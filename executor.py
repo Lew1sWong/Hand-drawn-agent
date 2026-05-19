@@ -106,12 +106,13 @@ async def execute_plan(
             ctx["enhanced_prompt"] = await _enhance_prompt(desc, deepseek_api_key)
             logger.info("Enhanced prompt: %s", ctx["enhanced_prompt"])
 
-        # Guard: figurine_to_anime needs an image — if planner misfired, skip
-        # it and fall through to text_to_video (added automatically below).
-        if step.tool == "figurine_to_anime" and not ctx.get("image_url"):
+        # Guard: figurine_to_anime + image_to_video both require image_url.
+        # If the planner chose either without an image, fall back to
+        # text_to_video and stop — do NOT continue to remaining steps.
+        if step.tool in ("figurine_to_anime", "image_to_video") and not ctx.get("image_url"):
             logger.warning(
-                "Step %d/%d: skipping figurine_to_anime — image_url not in context; "
-                "will use text_to_video instead", i, total
+                "Step %d/%d: '%s' needs image_url (not in context) — "
+                "falling back to text_to_video and stopping", i, total, step.tool
             )
             from tools import TextToVideoTool
             if "enhanced_prompt" not in ctx:
@@ -120,8 +121,8 @@ async def execute_plan(
                 )
             output = await TextToVideoTool().run(ctx)
             ctx.update(output)
-            logger.info("Step %d/%d done (fallback text_to_video) — keys: %s", i, total, list(output))
-            continue
+            logger.info("Fallback text_to_video done — keys: %s", list(output))
+            break  # remaining steps (e.g. image_to_video after figurine_to_anime) are skipped
 
         logger.info(
             "Step %d/%d: running '%s'  reason='%s'",
