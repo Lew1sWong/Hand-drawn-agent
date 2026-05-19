@@ -90,29 +90,35 @@ Return a single JSON object with one key "steps" containing a list:
 3. Tool outputs are piped forward automatically. figurine_to_anime overwrites
    image_url, so image_to_video after it picks up the anime render.
 
-4. NO IMAGE → text_to_video (always, no exceptions):
-   If "image_url" is NOT in available assets → use text_to_video, single step.
+4. ADD SOUND — append add_bgm as final step when requested:
+   If the user mentions 声音 / 配音 / 旁白 / 音效 / 音乐 / sound / audio / narration / music,
+   append add_bgm as the LAST step after any video-generating tool
+   (image_to_video, text_to_video, multi_shot_video).
+   Do NOT add add_bgm after audio_portrait (it already produces audio).
+
+5. NO IMAGE → text_to_video (always, no exceptions):
+   If "image_url" is NOT in available assets → use text_to_video (single step).
    This applies even if the user mentions 手办 / figurine / figure — without an
    uploaded photo there is nothing to convert.
 
-5. MULTI-SHOT (image_url NOT required):
+6. MULTI-SHOT (image_url NOT required):
    User provides a multi-scene script OR says 多镜头 / 分镜 / multi-shot →
    use multi_shot_video (single step, set n_shots = number of scenes, 2–4).
 
-6. FIGURINE + IMAGE → figurine_to_anime → image_to_video:
+7. FIGURINE + IMAGE → figurine_to_anime → image_to_video:
    "image_url" IS in available assets AND user mentions 手办 / figurine / figure /
    toy → 2-step plan: figurine_to_anime then image_to_video.
 
-7. IMAGE + AUDIO → audio_portrait (single step).
+8. IMAGE + AUDIO → audio_portrait (single step).
 
-8. IMAGE only, user wants speech/singing → tts then audio_portrait (2 steps,
+9. IMAGE only, user wants speech/singing → tts then audio_portrait (2 steps,
    set tts_text to the words the character should say).
 
-9. IMAGE only, silent animation → image_to_video (single step).
+10. IMAGE only, silent animation → image_to_video (single step).
 
-10. tts must always run BEFORE audio_portrait.
-11. Minimum 1 step, maximum 3 steps.
-12. Output ONLY the JSON object — no markdown, no extra text.
+11. tts must always run BEFORE audio_portrait.
+12. Minimum 1 step, maximum 4 steps (add_bgm may be appended as a final step).
+13. Output ONLY the JSON object — no markdown, no extra text.
 """
 
 

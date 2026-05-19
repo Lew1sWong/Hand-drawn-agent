@@ -689,6 +689,124 @@ for an animated video — run figurine_to_anime FIRST, then image_to_video."""
 
 
 # ---------------------------------------------------------------------------
+# AddBGMTool  — merge narration / ambient audio into a silent video
+# ---------------------------------------------------------------------------
+
+class AddBGMTool(BaseTool):
+    """
+    Post-processing step: adds audio to a silent generated video.
+
+    Pipeline:
+      1. Download the video from ctx["video_url"] using requests
+      2. Synthesise narration from ctx["user_description"] with edge-tts
+      3. Loop the audio to match video duration and merge with ffmpeg
+      4. Serve the merged file via /media/ and overwrite video_url
+
+    Requires ffmpeg to be installed on the server (brew install ffmpeg / apt install ffmpeg).
+    """
+
+    name        = "add_bgm"
+    description = """\
+Add narration audio to a silent video (image_to_video / text_to_video / multi_shot_video).
+Uses edge-tts to synthesise a voice-over from the scene description, then merges
+audio and video with ffmpeg. Overwrites video_url with the audio+video file.
+
+Add this as the LAST step of any plan that produces a silent video when the user
+asks for sound / 声音 / 配音 / 旁白 / narration / audio / music.
+Do NOT add this after audio_portrait — that tool already produces audio.
+
+Reads:  video_url, user_description, lang (optional, default zh)
+Writes: video_url (the merged file served via /media/)"""
+
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "voice": {
+                "type": "string",
+                "description": (
+                    "edge-tts voice name override. "
+                    "Chinese: zh-CN-XiaoxiaoNeural (F, default), zh-CN-YunxiNeural (M). "
+                    "English: en-US-JennyNeural (F), en-US-GuyNeural (M)."
+                ),
+            },
+        },
+    }
+
+    async def run(self, ctx: dict) -> dict:
+        import subprocess
+        import requests as _req
+
+        video_url = ctx.get("video_url")
+        if not video_url:
+            raise ValueError("[AddBGM] video_url is required in context")
+
+        text = ctx.get("user_description", "")
+        if not text:
+            raise ValueError("[AddBGM] user_description is required for TTS narration")
+
+        lang  = ctx.get("lang", "zh")
+        voice = ctx.get("voice") or (
+            "zh-CN-XiaoxiaoNeural" if lang == "zh" else "en-US-JennyNeural"
+        )
+
+        uid       = uuid.uuid4().hex
+        audio_in  = Path(f"/tmp/bgm_audio_{uid}.mp3")
+        video_in  = Path(f"/tmp/bgm_vid_in_{uid}.mp4")
+        video_out = Path(f"/tmp/bgm_{uid}.mp4")
+
+        try:
+            # ── Step 1: download silent video ─────────────────────────────
+            logger.info("[AddBGM] downloading video  url=%s", video_url)
+            r = _req.get(video_url, timeout=120)
+            r.raise_for_status()
+            video_in.write_bytes(r.content)
+            logger.info("[AddBGM] video saved  size=%d bytes", len(r.content))
+
+            # ── Step 2: synthesise narration ──────────────────────────────
+            narration = text[:400]          # edge-tts is reliable up to ~400 chars
+            logger.info("[AddBGM] TTS  voice=%s  text=%s", voice, narration[:60])
+            communicate = edge_tts.Communicate(narration, voice)
+            await communicate.save(str(audio_in))
+            logger.info("[AddBGM] TTS saved  size=%d bytes", audio_in.stat().st_size)
+
+            # ── Step 3: ffmpeg merge ──────────────────────────────────────
+            # -stream_loop -1 : loop audio indefinitely
+            # -shortest       : stop when the video ends
+            # -c:v copy       : don't re-encode video (fast, lossless)
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(video_in),
+                "-stream_loop", "-1", "-i", str(audio_in),
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-shortest",
+                str(video_out),
+            ]
+            logger.info("[AddBGM] running ffmpeg")
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if proc.returncode != 0:
+                raise RuntimeError(f"[AddBGM] ffmpeg error:\n{proc.stderr[-800:]}")
+            logger.info("[AddBGM] merge done  size=%d bytes", video_out.stat().st_size)
+
+            # ── Step 4: serve merged file ─────────────────────────────────
+            out_name = f"bgm_{uid}.mp4"
+            video_out.rename(Path(f"/tmp/{out_name}"))
+            new_url = f"{PUBLIC_BASE_URL}/media/{out_name}"
+            logger.info("[AddBGM] ready  url=%s", new_url)
+            return {"video_url": new_url, "has_audio": True}
+
+        finally:
+            for p in (audio_in, video_in, video_out):
+                try:
+                    p.unlink()
+                except FileNotFoundError:
+                    pass
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -699,6 +817,7 @@ ALL_TOOLS: list[BaseTool] = [
     MultiShotTool(),
     TTSTool(),
     AudioPortraitTool(),
+    AddBGMTool(),
     # VideoEffectsTool — req_key unverified, disabled until confirmed
 ]
 
