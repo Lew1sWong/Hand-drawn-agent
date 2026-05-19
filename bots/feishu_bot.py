@@ -79,7 +79,8 @@ _HELLO_WORDS = {
     "hello", "hi", "hey", "你好", "嗨", "哈喽", "哈啰",
     "开始", "start", "wake", "唤醒", "启动", "help", "帮助",
 }
-_STOP_WORDS = {"停止", "取消", "stop", "cancel", "停", "不要了", "算了"}
+_EXIT_WORDS  = {"exit", "quit", "退出", "重置", "reset", "/exit", "/reset", "/start"}
+_STOP_WORDS  = {"停止", "取消", "stop", "cancel", "停", "不要了", "算了"}
 
 _user_state: dict[str, dict[str, Any]] = {}
 _running_tasks: dict[str, asyncio.Task] = {}   # open_id → active agent task
@@ -384,6 +385,16 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
 
     # ── Hello / wake trigger — always shows the welcome card ──────────
     if text.lower() in _HELLO_WORDS:
+        await _show_welcome(open_id, chat_id)
+        return
+
+    # ── Exit / reset — clear state, re-show welcome card ──────────────
+    if text.lower() in _EXIT_WORDS:
+        task = _running_tasks.get(open_id)
+        if task and not task.done():
+            task.cancel()
+            _running_tasks.pop(open_id, None)
+        _user_state.pop(open_id, None)   # full reset
         await _show_welcome(open_id, chat_id)
         return
 
