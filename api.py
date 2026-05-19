@@ -3,7 +3,8 @@ Hand-drawn Animation Agent — FastAPI Web Layer
 ===============================================
 POST /animate            — submit a job (202 Accepted, returns job_id immediately)
 GET  /animate/{job_id}   — poll job status / retrieve video URL + plan
-GET  /media/{filename}   — serve locally stored media (used by Telegram bot)
+GET  /media/{filename}   — serve locally stored media (Telegram / Feishu bots)
+POST /feishu/event       — Feishu webhook (image / audio / text → animation)
 
 Async design:
   - Heavy lifting (plan → execute) runs in a BackgroundTask.
@@ -22,13 +23,14 @@ from typing import Optional
 
 import aiofiles
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 load_dotenv()  # load .env before any os.environ reads
 
 from agent import AgentResult, run_agent
+from bots.feishu_bot import handle_event as _feishu_handle
 
 logging.basicConfig(
     level=logging.INFO,
@@ -255,3 +257,13 @@ async def health():
     for j in _jobs.values():
         counts[j.status.value] += 1
     return {"status": "ok", **counts}
+
+
+@app.post("/feishu/event", include_in_schema=False)
+async def feishu_event(request: Request):
+    """
+    Feishu webhook — receives image / audio / text messages and runs the agent.
+    Also handles the one-time URL verification challenge from the Feishu console.
+    """
+    body = await request.json()
+    return await _feishu_handle(body)

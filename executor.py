@@ -28,17 +28,24 @@ from tools import TOOL_MAP
 logger = logging.getLogger(__name__)
 
 # Tools that need an LLM-enhanced prompt before they can run.
-_NEEDS_PROMPT = {"image_to_video"}
+_NEEDS_PROMPT = {"image_to_video", "text_to_video"}  # tts/audio_portrait use raw user text
 
 _ENHANCE_SYSTEM = """\
-You are an expert at writing prompts for AI image-to-video generation models.
-Convert the user's description into a concise, vivid English prompt (50–80 words).
+You are a cinematographer writing prompts for AI hand-drawn animation video generation.
+Convert the user's description into a vivid English prompt (60–90 words).
 
 Rules:
-1. Always start with: "Hand-drawn animation style, 2D sketch art, smooth motion,"
-2. Describe only visible motion, camera movement, and atmosphere — no story.
-3. Use present tense and concrete visual language.
-4. Always end with: "consistent line-art aesthetic, fluid animation."
+1. Always start with: "Hand-drawn animation style, 2D sketch art,"
+2. Choose ONE specific camera movement that fits the scene:
+   "slow push-in", "gentle pull-back", "smooth pan left", "smooth pan right",
+   "overhead crane shot descending", "low-angle tracking shot", "static wide shot",
+   "rack focus from foreground to background", "handheld close-up", "360 orbit"
+3. Add cinematic lighting: "golden-hour rim light", "soft dappled light through leaves",
+   "dramatic side-lighting", "misty volumetric fog", "moonlit silhouette",
+   "warm lantern glow", "cool blue-tinted dawn"
+4. Describe only visible motion, light, and atmosphere — no story, no dialogue.
+5. Use present tense and concrete visual language.
+6. Always end with: "consistent line-art aesthetic, fluid animation."
 Return only the prompt text — nothing else."""
 
 

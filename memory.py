@@ -1,39 +1,130 @@
 """
-Persistent user memory backed by a JSON file.
+Three-tier memory system with priority-based eviction.
 
-Stores:
-  preferred_style       — e.g. "hand-drawn 2D sketch, warm tones"
-  preferred_resolution  — {"width": 1280, "height": 720}
-  language              — user's preferred language, e.g. "zh" or "en"
-  successful_prompts    — ring-buffer of the last MAX_PROMPTS enhanced prompts
-                          that produced an accepted video (most useful for future
-                          planner context)
-  notes                 — freeform string the user can set for persistent hints
+  L1  distilled_style  — compact style summary, always injected into planner
+  L2  working[]        — ≤ L2_MAX MemoryEntry items, priority-managed
+  L3  archive[]        — unlimited, LLM-compressed when large
 
-`as_context_str()` produces a compact block injected into the planner prompt
-so DeepSeek is aware of past preferences without seeing the full history.
+Priority score (0–1) per entry:
+    score = 0.35 × freshness(t) + 0.30 × freq_score + 0.35 × quality
+
+  freshness : exponential decay, half-life = 24 h
+  freq_score: log(access_count+1) / log(20), capped at 1.0
+  quality   : derived from user rating (0–1); 0.5 = no rating yet
+
+Eviction flow (triggered when L2 would exceed L2_MAX):
+  1. Find lowest-priority unpinned entry in L2
+  2. Move it to L3 (archive)
+  3. When L3 ≥ L3_DISTILL_AT, set a flag — agent calls async distillation
+
+Rating → quality mapping:
+    5 → 1.0 | 4 → 0.8 | 3 → 0.6 | no-rating → 0.5 | 2 → 0.2 | 1 → 0.1
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections import deque
+import math
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_MAX_PROMPTS = 10   # ring-buffer capacity for successful prompts
+L2_MAX        = 20   # max working-memory slots
+L3_DISTILL_AT = 30   # archive size that triggers LLM distillation
+_HALF_LIFE_H  = 24   # freshness half-life in hours
+_DECAY_K      = math.log(2) / _HALF_LIFE_H   # λ for exp decay
 
+_RATING_TO_QUALITY = {5: 1.0, 4: 0.8, 3: 0.6, 2: 0.2, 1: 0.1}
+
+
+# ---------------------------------------------------------------------------
+# MemoryEntry
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MemoryEntry:
+    content:        str
+    created_ts:     float = field(default_factory=time.time)
+    last_access_ts: float = field(default_factory=time.time)
+    access_count:   int   = 1
+    quality:        float = 0.5   # 0–1
+    pinned:         bool  = False
+
+    # ── Priority ──────────────────────────────────────────────────────
+
+    def priority(self, now: Optional[float] = None) -> float:
+        if self.pinned:
+            return float("inf")
+        now = now or time.time()
+        age_h     = (now - self.last_access_ts) / 3600
+        freshness = math.exp(-_DECAY_K * age_h)
+        freq      = min(math.log(self.access_count + 1) / math.log(20), 1.0)
+        return 0.35 * freshness + 0.30 * freq + 0.35 * self.quality
+
+    def touch(self) -> None:
+        self.last_access_ts = time.time()
+        self.access_count  += 1
+
+    def set_quality_from_rating(self, rating: int) -> None:
+        self.quality = _RATING_TO_QUALITY.get(rating, 0.5)
+
+    # ── Serialisation ─────────────────────────────────────────────────
+
+    def to_dict(self) -> dict:
+        return {
+            "content":        self.content,
+            "created_ts":     self.created_ts,
+            "last_access_ts": self.last_access_ts,
+            "access_count":   self.access_count,
+            "quality":        self.quality,
+            "pinned":         self.pinned,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "MemoryEntry":
+        return cls(
+            content        = d.get("content", ""),
+            created_ts     = d.get("created_ts", time.time()),
+            last_access_ts = d.get("last_access_ts", time.time()),
+            access_count   = d.get("access_count", 1),
+            quality        = d.get("quality", 0.5),
+            pinned         = d.get("pinned", False),
+        )
+
+    @classmethod
+    def from_prompt(cls, prompt: str, quality: float = 0.5) -> "MemoryEntry":
+        return cls(content=prompt, quality=quality)
+
+
+# ---------------------------------------------------------------------------
+# UserMemory
+# ---------------------------------------------------------------------------
 
 class UserMemory:
     def __init__(self, path: Path | str = "user_memory.json") -> None:
         self._path = Path(path)
-        self.preferred_style: str           = ""
-        self.preferred_resolution: dict     = {"width": 1280, "height": 720}
-        self.language: str                  = "en"
-        self.successful_prompts: deque[str] = deque(maxlen=_MAX_PROMPTS)
-        self.notes: str                     = ""
+
+        # L1 — always-injected summary
+        self.distilled_style: str       = ""
+
+        # L2 — working memory (priority-managed)
+        self.working: list[MemoryEntry] = []
+
+        # L3 — archive (evicted entries, awaiting distillation)
+        self.archive: list[MemoryEntry] = []
+
+        # Misc
+        self.preferred_resolution: dict = {"width": 1280, "height": 720}
+        self.language: str              = "zh"
+        self.conversation_count: int    = 0
+        self.notes: str                 = ""
+
+        # In-memory only — reference to the last added entry for rating updates
+        self._last_entry: Optional[MemoryEntry] = None
 
     # ------------------------------------------------------------------
     # Persistence
@@ -44,63 +135,194 @@ class UserMemory:
             return self
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
-            self.preferred_style      = raw.get("preferred_style", "")
+
+            self.distilled_style      = raw.get("distilled_style", "")
             self.preferred_resolution = raw.get("preferred_resolution", {"width": 1280, "height": 720})
-            self.language             = raw.get("language", "en")
-            self.successful_prompts   = deque(raw.get("successful_prompts", []), maxlen=_MAX_PROMPTS)
+            self.language             = raw.get("language", "zh")
+            self.conversation_count   = raw.get("conversation_count", 0)
             self.notes                = raw.get("notes", "")
-            logger.debug("Memory loaded from %s", self._path)
+
+            self.working = [MemoryEntry.from_dict(e) for e in raw.get("working", [])]
+            self.archive = [MemoryEntry.from_dict(e) for e in raw.get("archive", [])]
+
+            # Migrate old format: successful_prompts list → MemoryEntry with quality=0.5
+            for p in raw.get("successful_prompts", []):
+                if p and not any(e.content == p for e in self.working):
+                    self.working.append(MemoryEntry.from_prompt(p, quality=0.5))
+
+            # Migrate old ratings list → update quality on matching working entries
+            for r in raw.get("ratings", []):
+                prompt, rating = r.get("prompt", ""), r.get("rating", 0)
+                for e in self.working:
+                    if e.content == prompt:
+                        e.set_quality_from_rating(rating)
+                        break
+
+            logger.debug("Memory loaded: L2=%d L3=%d", len(self.working), len(self.archive))
         except Exception:
             logger.warning("Could not load memory from %s — starting fresh", self._path, exc_info=True)
         return self
 
     def save(self) -> None:
         data = {
-            "preferred_style":      self.preferred_style,
+            "distilled_style":      self.distilled_style,
             "preferred_resolution": self.preferred_resolution,
             "language":             self.language,
-            "successful_prompts":   list(self.successful_prompts),
+            "conversation_count":   self.conversation_count,
             "notes":                self.notes,
+            "working":              [e.to_dict() for e in self.working],
+            "archive":              [e.to_dict() for e in self.archive],
         }
         self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        logger.debug("Memory saved to %s", self._path)
 
     # ------------------------------------------------------------------
-    # Mutation helpers
+    # L2 management
+    # ------------------------------------------------------------------
+
+    def add_entry(self, content: str, quality: float = 0.5) -> MemoryEntry:
+        """
+        Add a new MemoryEntry to L2 working memory.
+        If an entry with the same content already exists, touch it instead.
+        Evicts to L3 if L2 is full.
+        """
+        # De-duplicate
+        for e in self.working:
+            if e.content == content:
+                e.touch()
+                self._last_entry = e
+                self.save()
+                return e
+
+        # Evict if full
+        if len(self.working) >= L2_MAX:
+            self._evict_one()
+
+        entry = MemoryEntry.from_prompt(content, quality=quality)
+        self.working.append(entry)
+        self._last_entry = entry
+        self.save()
+        return entry
+
+    def _evict_one(self) -> None:
+        """Move the lowest-priority unpinned L2 entry to L3."""
+        now = time.time()
+        candidates = [e for e in self.working if not e.pinned]
+        if not candidates:
+            return
+        victim = min(candidates, key=lambda e: e.priority(now))
+        self.working.remove(victim)
+        self.archive.append(victim)
+        logger.info(
+            "Evicted to L3: %.60s… (priority=%.3f)",
+            victim.content, victim.priority(now),
+        )
+
+    # ------------------------------------------------------------------
+    # Public mutation helpers
     # ------------------------------------------------------------------
 
     def record_success(self, enhanced_prompt: str) -> None:
-        """Call after a successful run to remember the prompt that worked."""
-        if enhanced_prompt and enhanced_prompt not in self.successful_prompts:
-            self.successful_prompts.append(enhanced_prompt)
+        """Call after a successful generation."""
+        self.add_entry(enhanced_prompt, quality=0.5)
+        self.conversation_count += 1
+        self.save()
+
+    def record_rating(self, prompt: str, rating: int) -> None:
+        """Update quality of the most recent entry (or matching entry) with user rating."""
+        quality = _RATING_TO_QUALITY.get(rating, 0.5)
+
+        # Prefer updating the last added entry
+        if self._last_entry is not None:
+            self._last_entry.set_quality_from_rating(rating)
+            self._last_entry.touch()
             self.save()
+            logger.info("Rating %d/5 applied to last entry (quality→%.2f)", rating, quality)
+            return
+
+        # Fallback: find matching content in L2
+        for e in self.working:
+            if e.content == prompt:
+                e.set_quality_from_rating(rating)
+                e.touch()
+                self.save()
+                return
+
+    def update_distilled(self, distilled: str) -> None:
+        """Store LLM-distilled style summary (L1)."""
+        self.distilled_style = distilled
+        self.save()
+        logger.info("L1 distilled style updated: %s", distilled[:100])
+
+    def pin(self, content_substr: str) -> int:
+        """Pin all L2 entries whose content contains the given substring. Returns count pinned."""
+        count = sum(1 for e in self.working if content_substr in e.content and not e.pinned)
+        for e in self.working:
+            if content_substr in e.content:
+                e.pinned = True
+        if count:
+            self.save()
+        return count
 
     def update(self, **kwargs) -> None:
-        """Bulk-update known fields and persist. Unknown keys are ignored."""
-        allowed = {"preferred_style", "preferred_resolution", "language", "notes"}
+        allowed = {"preferred_resolution", "language", "notes"}
         for k, v in kwargs.items():
             if k in allowed:
                 setattr(self, k, v)
         self.save()
 
     # ------------------------------------------------------------------
-    # Planner context string
+    # Distillation triggers (checked by agent.py)
+    # ------------------------------------------------------------------
+
+    def should_distill_working(self) -> bool:
+        """True when enough high-quality entries exist to re-distill L1."""
+        good = [e for e in self.working if e.quality >= 0.6]
+        return len(good) >= 5 and len(good) % 5 == 0
+
+    def should_distill_archive(self) -> bool:
+        """True when L3 archive is large enough to compress."""
+        return len(self.archive) >= L3_DISTILL_AT
+
+    def top_working(self, n: int = 5) -> list[MemoryEntry]:
+        """Return top-N L2 entries by priority (for context injection)."""
+        now = time.time()
+        for e in self.working:
+            pass  # touch is NOT called here — reading doesn't change priority
+        return sorted(self.working, key=lambda e: e.priority(now), reverse=True)[:n]
+
+    def promote_from_archive(self, entries: list[MemoryEntry]) -> None:
+        """Move distilled entries back to L2, clearing archive."""
+        self.archive.clear()
+        for e in entries:
+            if len(self.working) >= L2_MAX:
+                self._evict_one()
+            self.working.append(e)
+        self.save()
+
+    # ------------------------------------------------------------------
+    # Planner context string (L1 + top L2)
     # ------------------------------------------------------------------
 
     def as_context_str(self) -> str:
-        """Return a compact block for injection into the planner system prompt."""
         lines = ["[User Memory]"]
-        if self.preferred_style:
-            lines.append(f"- Preferred style: {self.preferred_style}")
+
+        if self.distilled_style:
+            lines.append(f"- Distilled style (high-confidence): {self.distilled_style}")
+
         res = self.preferred_resolution
         lines.append(f"- Preferred resolution: {res.get('width', 1280)}×{res.get('height', 720)}")
         if self.language:
             lines.append(f"- Language: {self.language}")
         if self.notes:
             lines.append(f"- Notes: {self.notes}")
-        if self.successful_prompts:
-            recent = list(self.successful_prompts)[-3:]  # last 3 only to keep prompt short
-            lines.append("- Recent successful prompts (use as style reference, not copy-paste):")
-            for p in recent:
-                lines.append(f"    • {p}")
+        if self.conversation_count:
+            lines.append(f"- Total generations: {self.conversation_count}")
+
+        top = self.top_working(5)
+        if top:
+            lines.append("- Top working memories (sorted by priority):")
+            for e in top:
+                stars = f"q={e.quality:.1f}"
+                lines.append(f"    [{stars}] {e.content[:120]}")
+
         return "\n".join(lines)

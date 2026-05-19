@@ -1,5 +1,6 @@
 .env
 .env.local
+user_memory.json
 venv/
 .venv/
 node_modules/

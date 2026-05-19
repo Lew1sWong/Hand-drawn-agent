@@ -84,16 +84,23 @@ Return a single JSON object with one key "steps" containing a list:
 
 === Planning rules ===
 1. Use only the tool names listed above — never invent new ones.
-2. "inputs" contains ONLY values the planner must set (e.g. duration, effect).
+2. "inputs" contains ONLY values the planner must set (e.g. duration, n_shots).
    Do NOT include image_url, audio_url, video_url, or enhanced_prompt — they
    are resolved automatically from context.
 3. Tool outputs are piped forward: a video_url produced by step N is available
    as input to step N+1 automatically.
-4. If the user's request requires audio lip-sync, use audio_portrait.
-5. If the user wants a visual effect applied after animation, chain video_effects last.
-6. Default to image_to_video when the intent is ambiguous.
-7. Minimum 1 step, maximum 3 steps.
-8. Output ONLY the JSON object — no markdown, no extra commentary.
+4. MULTI-SHOT RULE (highest priority check):
+   If the user provides a detailed script with multiple scenes, OR explicitly asks
+   for "多镜头", "多场景", "分镜", "multi-shot", or "multi-scene" → use multi_shot_video
+   (single step). Set n_shots to the number of distinct scenes (2–4).
+5. If "image_url" is NOT in available assets (and not multi-shot) → use text_to_video.
+6. If "image_url" IS available and "audio_url" IS available → use audio_portrait.
+7. If "image_url" IS available and "audio_url" is NOT available:
+   - User wants character to speak/sing → plan: tts then audio_portrait (set tts_text in tts inputs).
+   - User wants silent animation → use image_to_video.
+8. tts always runs BEFORE audio_portrait; set tts_text to the words the character should say.
+9. Minimum 1 step, maximum 3 steps.
+10. Output ONLY the JSON object — no markdown, no extra commentary.
 """
 
 

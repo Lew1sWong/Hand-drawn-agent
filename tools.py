@@ -23,9 +23,14 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from abc import ABC, abstractmethod
+from pathlib import Path
 
+import edge_tts
 from volcengine.visual.VisualService import VisualService
+
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 
 logger = logging.getLogger(__name__)
 
@@ -33,29 +38,37 @@ logger = logging.getLogger(__name__)
 # Shared Volcengine helpers
 # ---------------------------------------------------------------------------
 
-_STATUS_DONE    = 2
-_STATUS_FAILED  = 3
-_POLL_INTERVAL  = 5    # seconds between status checks
-_MAX_TRIES      = 72   # 72 × 5 s = 6 min ceiling
+_STATUS_DONE    = "done"
+_STATUS_FAILED  = "failed"
+_POLL_INTERVAL  = 5     # seconds between status checks
+_MAX_TRIES      = 180   # 180 × 5 s = 15 min ceiling
 
 
-def _make_svc() -> VisualService:
+def _make_svc(socket_timeout: int = 60) -> VisualService:
     svc = VisualService()
     svc.set_ak(os.environ["VOLC_ACCESSKEY"])
     svc.set_sk(os.environ["VOLC_SECRETKEY"])
+    svc.set_connection_timeout(15)
+    svc.set_socket_timeout(socket_timeout)
     return svc
 
 
-def _assert_ok(resp: dict, ctx: str) -> None:
+def _assert_ok(resp, ctx: str) -> None:
+    if isinstance(resp, bytes):
+        try:
+            resp = json.loads(resp.decode("utf-8"))
+        except Exception:
+            raise RuntimeError(f"[{ctx}] SDK returned unexpected bytes: {resp[:300]}")
     code = resp.get("code")
     if code != 10000:
         raise RuntimeError(
-            f"[{ctx}] Volcengine error code={code} "
-            f"msg='{resp.get('message')}' req_id={resp.get('request_id')}"
+            f"[{ctx}] code={code} msg='{resp.get('message')}' req_id={resp.get('request_id')}"
         )
 
 
 def _extract_video_url(data: dict) -> str:
+    if url := data.get("video_url"):
+        return url
     for info in data.get("video_infos") or []:
         if url := info.get("video_url"):
             return url
@@ -74,7 +87,13 @@ async def _submit_and_poll(body: dict, label: str) -> dict:
     loop = asyncio.get_running_loop()
 
     # Submit
-    resp = await loop.run_in_executor(None, lambda: _make_svc().cv_submit_task(body))
+    try:
+        resp = await loop.run_in_executor(None, lambda: _make_svc().cv_sync2async_submit_task(body))
+    except Exception as e:
+        raw = e.args[0] if e.args else b""
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="replace")
+        raise RuntimeError(f"[{label}/submit] {raw}") from None
     _assert_ok(resp, f"{label}/submit")
     task_id = resp["data"]["task_id"]
     logger.info("%s submitted  task_id=%s", label, task_id)
@@ -82,7 +101,7 @@ async def _submit_and_poll(body: dict, label: str) -> dict:
     # Poll
     poll_body = {"req_key": body["req_key"], "task_id": task_id}
     for attempt in range(1, _MAX_TRIES + 1):
-        poll_resp = await loop.run_in_executor(None, lambda: _make_svc().cv_get_result(poll_body))
+        poll_resp = await loop.run_in_executor(None, lambda: _make_svc().cv_sync2async_get_result(poll_body))
         _assert_ok(poll_resp, f"{label}/poll")
         data = poll_resp["data"]
         status = data.get("status")
@@ -92,7 +111,7 @@ async def _submit_and_poll(body: dict, label: str) -> dict:
             return {"task_id": task_id, "data": data}
 
         if status == _STATUS_FAILED:
-            reason = data.get("message") or data.get("err_msg", "unknown")
+            reason = data.get("message") or data.get("err_msg", str(status))
             raise RuntimeError(f"{label} failed  task_id={task_id}  reason={reason}")
 
         logger.debug("%s attempt=%d/%d status=%s", label, attempt, _MAX_TRIES, status)
@@ -143,7 +162,6 @@ class ImageToVideoTool(BaseTool):
         "required": [],
     }
 
-    # TODO: confirm req_key with https://www.volcengine.com/docs/85621/1783678
     _REQ_KEY = "jimeng_ti2v_v30_pro"
 
     async def run(self, ctx: dict) -> dict:
@@ -163,7 +181,47 @@ class ImageToVideoTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# Tool 2 — Audio-driven Portrait Video
+# Tool 2 — Text-to-Video  (JiMeng 3.0)
+# ---------------------------------------------------------------------------
+
+class TextToVideoTool(BaseTool):
+    name = "text_to_video"
+    description = (
+        "Generates a video directly from a text description — no image required. "
+        "Use this when the user has NO sketch/image and just wants to describe a scene. "
+        "Requires context key: enhanced_prompt (str). "
+        "Optional overrides: duration (4 or 8 s), width (int), height (int). "
+        "Produces: video_url."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "duration": {"type": "integer", "enum": [4, 8], "default": 4},
+            "width":    {"type": "integer", "default": 1280},
+            "height":   {"type": "integer", "default": 720},
+        },
+        "required": [],
+    }
+
+    _REQ_KEY = "jimeng_ti2v_v30_pro"
+
+    async def run(self, ctx: dict) -> dict:
+        body = {
+            "req_key":  self._REQ_KEY,
+            "prompt":   ctx["enhanced_prompt"],
+            "duration": ctx.get("duration", 4),
+            "width":    ctx.get("width", 1280),
+            "height":   ctx.get("height", 720),
+        }
+        result = await _submit_and_poll(body, "TextToVideo")
+        return {
+            "video_url": _extract_video_url(result["data"]),
+            "task_id":   result["task_id"],
+        }
+
+
+# ---------------------------------------------------------------------------
+# Tool 3 — Audio-driven Portrait Video
 # docs: https://www.volcengine.com/docs/86081/1804513
 #
 # Two-step flow (handled internally as one logical tool):
@@ -174,8 +232,9 @@ class ImageToVideoTool(BaseTool):
 class AudioPortraitTool(BaseTool):
     name = "audio_portrait"
     description = (
-        "Creates a talking-head / lip-sync video from a still portrait photo and an audio clip. "
+        "Creates a talking-head / lip-sync video (OmniHuman 1.5) from a portrait photo and audio. "
         "Requires context keys: image_url (str), audio_url (str). "
+        "Optional: tts_text used as style prompt. "
         "Produces: video_url."
     )
     input_schema = {
@@ -184,61 +243,93 @@ class AudioPortraitTool(BaseTool):
         "required": [],
     }
 
-    # TODO: confirm both req_keys with https://www.volcengine.com/docs/86081/1804513
-    _REQ_KEY_CREATE = "jimeng_audio_driven_img_create"
-    _REQ_KEY_VIDEO  = "jimeng_audio_driven_video_gen"
+    _REQ_KEY_DETECT = "jimeng_realman_avatar_object_detection"
+    _REQ_KEY_VIDEO  = "jimeng_realman_avatar_picture_omni_v15"
 
     async def run(self, ctx: dict) -> dict:
         loop = asyncio.get_running_loop()
 
-        # Step A: register portrait image → portrait_id
-        create_body = {
-            "req_key":   self._REQ_KEY_CREATE,
-            "image_url": ctx["image_url"],
-        }
-        create_resp = await loop.run_in_executor(
-            None, lambda: _make_svc().cv_submit_task(create_body)
-        )
-        _assert_ok(create_resp, "AudioPortrait/create")
-        create_data = create_resp.get("data", {})
+        # Step A: subject detection → mask URLs (synchronous, best-effort)
+        mask_url: list[str] = []
+        try:
+            detect_body = {
+                "req_key":   self._REQ_KEY_DETECT,
+                "image_url": ctx["image_url"],
+            }
+            detect_resp = await loop.run_in_executor(
+                None, lambda: _make_svc().cv_process(detect_body)
+            )
+            _assert_ok(detect_resp, "AudioPortrait/detect")
+            detect_data = detect_resp.get("data", {})
+            logger.info("AudioPortrait detection response keys: %s", list(detect_data.keys()))
+            # Try common keys where mask URL(s) might live
+            masks = (
+                detect_data.get("masks")
+                or detect_data.get("mask_urls")
+                or detect_data.get("mask_url")
+                or []
+            )
+            if isinstance(masks, str):
+                masks = [masks]
+            if masks:
+                mask_url = [masks[0]]
+            logger.info("AudioPortrait detection done, masks=%d", len(mask_url))
+        except Exception as exc:
+            logger.warning("AudioPortrait detection step failed (%s) — continuing with empty mask", exc)
 
-        # The create call may be synchronous (portrait_id returned immediately)
-        # or async (task_id returned, then poll separately). Handle both.
-        portrait_id = create_data.get("portrait_id")
-        if not portrait_id:
-            create_task_id = create_data.get("task_id")
-            if not create_task_id:
-                raise RuntimeError(
-                    f"AudioPortrait: neither portrait_id nor task_id in create response: {create_data}"
-                )
-            logger.info("AudioPortrait create is async, polling task_id=%s", create_task_id)
-            poll_body = {"req_key": self._REQ_KEY_CREATE, "task_id": create_task_id}
-            for attempt in range(1, _MAX_TRIES + 1):
-                pr = await loop.run_in_executor(None, lambda: _make_svc().cv_get_result(poll_body))
-                _assert_ok(pr, "AudioPortrait/create/poll")
-                d = pr["data"]
-                if d.get("status") == _STATUS_DONE:
-                    portrait_id = d.get("portrait_id")
-                    break
-                if d.get("status") == _STATUS_FAILED:
-                    raise RuntimeError(f"AudioPortrait create failed: {d}")
-                await asyncio.sleep(_POLL_INTERVAL)
-            else:
-                raise TimeoutError("AudioPortrait create timed out")
-
-        logger.info("AudioPortrait portrait_id=%s", portrait_id)
-
-        # Step B: generate video
+        # Step B: submit video generation task (async)
         video_body = {
-            "req_key":     self._REQ_KEY_VIDEO,
-            "portrait_id": portrait_id,
-            "audio_url":   ctx["audio_url"],
+            "req_key":   self._REQ_KEY_VIDEO,
+            "image_url": ctx["image_url"],
+            "mask_url":  mask_url,
+            "audio_url": ctx["audio_url"],
+            "prompt":    ctx.get("tts_text") or ctx.get("user_description", ""),
         }
-        result = await _submit_and_poll(video_body, "AudioPortrait/video")
-        return {
-            "video_url": _extract_video_url(result["data"]),
-            "task_id":   result["task_id"],
-        }
+        try:
+            submit_resp = await loop.run_in_executor(
+                None, lambda: _make_svc(socket_timeout=60).cv_submit_task(video_body)
+            )
+        except Exception as e:
+            raw = e.args[0] if e.args else b""
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="replace")
+            if "504" in str(raw) or "timed out" in str(raw).lower():
+                raise RuntimeError(
+                    "OmniHuman video generation timed out (504). "
+                    "Please verify the OmniHuman 1.5 service is fully activated in the "
+                    "Volcengine console (即梦AI → 数字人 → 服务开通 → 确认已开通状态)."
+                ) from None
+            raise RuntimeError(f"[AudioPortrait/submit] {raw}") from None
+        _assert_ok(submit_resp, "AudioPortrait/submit")
+        task_id = submit_resp["data"]["task_id"]
+        logger.info("AudioPortrait submitted task_id=%s", task_id)
+
+        # Poll for result
+        poll_body = {"req_key": self._REQ_KEY_VIDEO, "task_id": task_id}
+        for attempt in range(1, _MAX_TRIES + 1):
+            poll_resp = await loop.run_in_executor(
+                None, lambda: _make_svc().cv_get_result(poll_body)
+            )
+            _assert_ok(poll_resp, "AudioPortrait/poll")
+            data = poll_resp["data"]
+            status = data.get("status")
+
+            if status == _STATUS_DONE:
+                logger.info("AudioPortrait done task_id=%s", task_id)
+                return {
+                    "video_url": _extract_video_url(data),
+                    "task_id":   task_id,
+                }
+            if status == _STATUS_FAILED:
+                reason = data.get("message") or data.get("err_msg", str(status))
+                raise RuntimeError(f"AudioPortrait failed task_id={task_id} reason={reason}")
+
+            logger.debug("AudioPortrait attempt=%d/%d status=%s", attempt, _MAX_TRIES, status)
+            await asyncio.sleep(_POLL_INTERVAL)
+
+        raise TimeoutError(
+            f"AudioPortrait task_id={task_id} timed out after {_MAX_TRIES * _POLL_INTERVAL}s"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -282,13 +373,163 @@ class VideoEffectsTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Tool 4 — Text-to-Speech  (edge-tts, free, no API key required)
+# Produces an audio file served via /media/, which audio_portrait can consume.
+# ---------------------------------------------------------------------------
+
+class TTSTool(BaseTool):
+    name = "tts"
+    description = (
+        "Converts text to natural speech and returns an audio_url. "
+        "Use this BEFORE audio_portrait when the user has no audio file. "
+        "Requires context key: tts_text (str) — the words to speak; "
+        "falls back to user_description if tts_text not set. "
+        "Optional override: voice (str) — edge-tts voice name, "
+        "default 'zh-CN-XiaoxiaoNeural' (female Chinese). "
+        "Other good voices: 'zh-CN-YunxiNeural' (male), 'en-US-JennyNeural' (English). "
+        "Produces: audio_url."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "tts_text": {
+                "type": "string",
+                "description": "Exact text for the character to speak. If omitted, uses user_description.",
+            },
+            "voice": {
+                "type": "string",
+                "default": "zh-CN-XiaoxiaoNeural",
+                "description": "edge-tts voice name.",
+            },
+        },
+        "required": [],
+    }
+
+    async def run(self, ctx: dict) -> dict:
+        text  = ctx.get("tts_text") or ctx.get("user_description", "")
+        voice = ctx.get("voice", "zh-CN-XiaoxiaoNeural")
+
+        fname    = f"tts_{uuid.uuid4().hex}.mp3"
+        tmp_path = f"/tmp/{fname}"
+
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(tmp_path)
+
+        audio_url = f"{PUBLIC_BASE_URL}/media/{fname}"
+        logger.info("TTS saved  voice=%s  path=%s  url=%s", voice, tmp_path, audio_url)
+        return {"audio_url": audio_url}
+
+
+# ---------------------------------------------------------------------------
+# Tool 5 — Multi-Shot Video  (generates N clips from a script, concurrently)
+# ---------------------------------------------------------------------------
+
+class MultiShotTool(BaseTool):
+    name = "multi_shot_video"
+    description = (
+        "Generates 2–4 independent video clips (shots/scenes) from a multi-scene script. "
+        "Use when the user provides a detailed script with multiple scenes, "
+        "or asks for a 'multi-shot', 'multi-scene', or '多镜头' video. "
+        "Requires context key: user_description (the full script). "
+        "Optional override: n_shots (int 2–4, default 3). "
+        "Produces: video_url (first clip), video_urls (JSON list of all clip URLs)."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "n_shots": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 4,
+                "default": 3,
+                "description": "Number of video clips to generate.",
+            },
+        },
+        "required": [],
+    }
+
+    _REQ_KEY = "jimeng_ti2v_v30_pro"
+
+    async def _parse_scenes(self, script: str, n: int) -> list[str]:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(
+            api_key=os.environ["DEEPSEEK_API_KEY"],
+            base_url="https://api.deepseek.com",
+        )
+        system = f"""\
+You are a cinematographer. Split the user's script into exactly {n} short video-clip prompts.
+Each prompt must:
+1. Start with "Hand-drawn animation style, 2D sketch art,"
+2. Include a unique camera move (push-in / pull-back / pan / crane / tracking / static wide)
+3. Include cinematic lighting (golden hour / moonlit / lantern glow / dappled / dramatic side-light)
+4. Be 40–60 words, present tense, describe only visible motion and atmosphere.
+5. End with "consistent line-art aesthetic, fluid animation."
+Return a JSON object with key "scenes" containing a list of {n} prompt strings.
+Return ONLY the JSON — no markdown, no explanation."""
+        resp = await client.chat.completions.create(
+            model="deepseek-chat",
+            max_tokens=800,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user",   "content": script},
+            ],
+        )
+        data = json.loads(resp.choices[0].message.content)
+        scenes = data.get("scenes", [])
+        logger.info("MultiShot parsed %d scenes from script", len(scenes))
+        return scenes[:n]
+
+    async def _gen_clip(self, prompt: str, ctx: dict, idx: int) -> str:
+        body: dict = {
+            "req_key":  self._REQ_KEY,
+            "prompt":   prompt,
+            "duration": ctx.get("duration", 4),
+            "width":    ctx.get("width", 1280),
+            "height":   ctx.get("height", 720),
+        }
+        if ctx.get("image_url") and idx == 0:
+            body["image_urls"] = [ctx["image_url"]]
+        result = await _submit_and_poll(body, f"MultiShot[{idx+1}]")
+        return _extract_video_url(result["data"])
+
+    async def run(self, ctx: dict) -> dict:
+        n = min(max(int(ctx.get("n_shots", 3)), 2), 4)
+        script = ctx.get("user_description", "")
+        scenes = await self._parse_scenes(script, n)
+        if not scenes:
+            raise RuntimeError("MultiShot: DeepSeek returned no scenes from script")
+
+        clip_tasks = [self._gen_clip(scene, ctx, i) for i, scene in enumerate(scenes)]
+        results = await asyncio.gather(*clip_tasks, return_exceptions=True)
+
+        video_urls = [r for r in results if isinstance(r, str)]
+        failures   = [r for r in results if isinstance(r, Exception)]
+        if failures:
+            logger.warning("MultiShot: %d clip(s) failed: %s", len(failures), failures)
+        if not video_urls:
+            raise RuntimeError("MultiShot: all clip generations failed")
+
+        logger.info("MultiShot produced %d/%d clips", len(video_urls), n)
+        return {
+            "video_url":    video_urls[0],
+            "video_urls":   json.dumps(video_urls, ensure_ascii=False),
+            "scene_prompts": json.dumps(scenes, ensure_ascii=False),
+        }
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
 ALL_TOOLS: list[BaseTool] = [
     ImageToVideoTool(),
+    TextToVideoTool(),
+    MultiShotTool(),
+    TTSTool(),
     AudioPortraitTool(),
-    VideoEffectsTool(),
+    # VideoEffectsTool — req_key unverified, disabled until confirmed
 ]
 
 TOOL_MAP: dict[str, BaseTool] = {t.name: t for t in ALL_TOOLS}
