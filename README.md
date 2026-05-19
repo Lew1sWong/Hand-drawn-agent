@@ -516,3 +516,7 @@ For demos, a working mock experience now exists in [`mirrorquant_demo/app.py`](/
 ## License
 
 Add your preferred license here.
+
+
+## To start 
+python -m uvicorn mirrorquant.app:app --reload

@@ -20,9 +20,9 @@ def _load_json(filename: str):
 
 
 app = FastAPI(
-    title="MirrorQuant Demo API",
+    title="MirrorQuant API",
     version="0.1.0",
-    description="Mock API for a polished MirrorQuant concept demo.",
+    description="API for a polished MirrorQuant concept demo.",
 )
 
 
