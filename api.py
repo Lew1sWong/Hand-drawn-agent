@@ -30,7 +30,7 @@ from pydantic import BaseModel
 load_dotenv()  # load .env before any os.environ reads
 
 from agent import AgentResult, run_agent
-from bots.feishu_bot import handle_event as _feishu_handle
+from bots.feishu_bot import handle_card_action as _feishu_card, handle_event as _feishu_handle
 
 logging.basicConfig(
     level=logging.INFO,
@@ -267,3 +267,13 @@ async def feishu_event(request: Request):
     """
     body = await request.json()
     return await _feishu_handle(body)
+
+
+@app.post("/feishu/card", include_in_schema=False)
+async def feishu_card(request: Request):
+    """
+    Feishu card-action callback — called when users click buttons on interactive cards.
+    Register this URL in Feishu console → App Features → Bot → Card Callback URL.
+    """
+    body = await request.json()
+    return await _feishu_card(body)

@@ -75,6 +75,10 @@ _S_WAIT_AUDIO  = "waiting_audio_or_desc"
 _S_WAIT_DESC   = "waiting_desc"
 _S_WAIT_RATING = "waiting_rating"    # after video delivered, awaiting 1-5 score
 
+_HELLO_WORDS = {
+    "hello", "hi", "hey", "你好", "嗨", "哈喽", "哈啰",
+    "开始", "start", "wake", "唤醒", "启动", "help", "帮助",
+}
 _STOP_WORDS = {"停止", "取消", "stop", "cancel", "停", "不要了", "算了"}
 
 _user_state: dict[str, dict[str, Any]] = {}
@@ -106,14 +110,72 @@ def _t(open_id: str, zh: str, en: str) -> str:
     return zh if _lang(open_id) == "zh" else en
 
 
-_WELCOME_MSG = (
-    "👋 欢迎使用手绘动画 AI！\n"
-    "Welcome to Hand-Drawn Animation AI!\n\n"
-    "请选择语言 / Please choose language:\n"
-    "1️⃣  中文\n"
-    "2️⃣  English\n\n"
-    "回复 1 或 2 / Reply 1 or 2"
-)
+def _welcome_card(open_id: str) -> str:
+    """Interactive Feishu card: bilingual intro + language-select buttons."""
+    card = {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {
+                "tag": "plain_text",
+                "content": "🎨 手绘动画 AI · Hand-Drawn Agent",
+            },
+            "template": "blue",
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        "**欢迎！我可以帮你：**\n"
+                        "🖼️  草图 → 动画视频\n"
+                        "🎵  图片 + 音频 → 口播视频\n"
+                        "🎬  多镜头电影风格生成\n"
+                        "⭐  记忆你的风格偏好\n\n"
+                        "**Welcome! I can help you:**\n"
+                        "🖼️  Sketch → animated video\n"
+                        "🎵  Image + audio → talking portrait\n"
+                        "🎬  Multi-shot cinematic generation\n"
+                        "⭐  Remember your style preferences"
+                    ),
+                },
+            },
+            {"tag": "hr"},
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "**请选择语言 / Choose your language:**",
+                },
+            },
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "🇨🇳 中文"},
+                        "type": "primary",
+                        "value": {
+                            "action": "set_lang",
+                            "lang":    "zh",
+                            "open_id": open_id,
+                        },
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "🇬🇧 English"},
+                        "type": "default",
+                        "value": {
+                            "action": "set_lang",
+                            "lang":    "en",
+                            "open_id": open_id,
+                        },
+                    },
+                ],
+            },
+        ],
+    }
+    return json.dumps(card)
 
 
 def _get_state(open_id: str) -> dict:
@@ -167,6 +229,29 @@ def _extract_post_text(content: dict) -> str:
 async def _send(chat_id: str, text: str) -> None:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(_executor, _send_text_sync, chat_id, text)
+
+
+def _send_card_sync(chat_id: str, card_json: str) -> None:
+    req = (
+        CreateMessageRequest.builder()
+        .receive_id_type("chat_id")
+        .request_body(
+            CreateMessageRequestBody.builder()
+            .receive_id(chat_id)
+            .msg_type("interactive")
+            .content(card_json)
+            .build()
+        )
+        .build()
+    )
+    resp = lark_client.im.v1.message.create(req)
+    if not resp.success():
+        logger.error("send_card failed code=%s msg=%s", resp.code, resp.msg)
+
+
+async def _send_card(chat_id: str, card_json: str) -> None:
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(_executor, _send_card_sync, chat_id, card_json)
 
 
 def _download_sync(message_id: str, file_key: str, rtype: str) -> bytes:
@@ -247,11 +332,16 @@ def _rating_prompt(open_id: str) -> str:
 # Per-message-type handlers
 # ---------------------------------------------------------------------------
 
+async def _show_welcome(open_id: str, chat_id: str) -> None:
+    """Send the interactive welcome card and put user in WAIT_LANG."""
+    _set_state(open_id, _S_WAIT_LANG)
+    await _send_card(chat_id, _welcome_card(open_id))
+
+
 async def _on_image(open_id: str, chat_id: str, message_id: str, content: dict) -> None:
-    # New user: show onboarding first, drop image (they'll resend after choosing language)
+    # New user: show welcome card first; they must pick a language before continuing.
     if open_id not in _user_state:
-        _set_state(open_id, _S_WAIT_LANG)
-        await _send(chat_id, _WELCOME_MSG)
+        await _show_welcome(open_id, chat_id)
         return
 
     image_key = content.get("image_key", "")
@@ -292,32 +382,31 @@ async def _on_audio(open_id: str, chat_id: str, message_id: str, content: dict) 
 async def _on_text(open_id: str, chat_id: str, text: str) -> None:
     text = text.strip()
 
-    # ── New user onboarding (language selection) ───────────────────────
+    # ── Hello / wake trigger — always shows the welcome card ──────────
+    if text.lower() in _HELLO_WORDS:
+        await _show_welcome(open_id, chat_id)
+        return
+
+    # ── Brand-new user who typed something other than hello ───────────
     if open_id not in _user_state:
-        _set_state(open_id, _S_WAIT_LANG)
-        await _send(chat_id, _WELCOME_MSG)
+        await _show_welcome(open_id, chat_id)
         return
 
     state = _get_state(open_id)
     s     = state["state"]
 
-    # ── Language selection ─────────────────────────────────────────────
+    # ── Waiting for language (card not clicked yet — fallback text) ────
     if s == _S_WAIT_LANG:
+        # Accept typed "1"/"2" as a fallback if card buttons don't work
         if text in ("2", "english", "en", "English"):
             lang = "en"
-            _set_state(open_id, _S_WAIT_IMAGE, lang=lang)
-            await _send(chat_id,
-                "✅ English selected!\n\n"
-                "Send me an image or a text description to start. 🎨\n"
-                "💡 Multi-shot: send a detailed multi-scene script!")
         else:
             lang = "zh"
-            _set_state(open_id, _S_WAIT_IMAGE, lang=lang)
-            await _send(chat_id,
-                "✅ 已选择中文！\n\n"
-                "发送图片或文字描述开始创作。🎨\n"
-                "💡 多镜头：发送含多个场景的脚本！")
-        # Persist language to memory
+        _set_state(open_id, _S_WAIT_IMAGE, lang=lang)
+        await _send(chat_id, _t(open_id,
+            "✅ 已选择中文！发送图片或描述开始创作。🎨",
+            "✅ English selected! Send an image or description to start. 🎨",
+        ))
         from memory import UserMemory
         UserMemory("user_memory.json").load().update(language=lang)
         return
@@ -436,6 +525,56 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
             "发送新草图继续创作。🎨",
             "Send a new sketch to continue. 🎨",
         ))
+
+
+# ---------------------------------------------------------------------------
+# Card action callback — called from api.py POST /feishu/card
+# ---------------------------------------------------------------------------
+
+async def handle_card_action(body: dict) -> dict:
+    """
+    Feishu calls this URL when a user clicks a button on an interactive card.
+    We use it exclusively for the welcome-card language-selection buttons.
+
+    Must be registered in Feishu console → App Features → Bot → Card Callback URL.
+    """
+    # Verification challenge (Feishu sends this when you first save the URL)
+    if body.get("type") == "url_verification":
+        return {"challenge": body.get("challenge", "")}
+
+    action  = body.get("action", {})
+    value   = action.get("value", {})
+
+    if value.get("action") != "set_lang":
+        return {}
+
+    lang    = value.get("lang", "zh")
+    open_id = value.get("open_id") or body.get("open_id", "")
+    chat_id = body.get("open_chat_id", "")
+
+    if not open_id:
+        return {}
+
+    _set_state(open_id, _S_WAIT_IMAGE, lang=lang)
+
+    from memory import UserMemory
+    UserMemory("user_memory.json").load().update(language=lang)
+
+    if chat_id:
+        asyncio.create_task(_send(chat_id, _t(open_id,
+            "✅ 已选择中文！\n\n发送图片或文字描述开始创作。🎨\n"
+            "💡 发送多场景脚本可生成多镜头视频！",
+            "✅ English selected!\n\nSend an image or text description to start. 🎨\n"
+            "💡 Send a multi-scene script for multi-shot generation!",
+        )))
+
+    # Return a toast that briefly appears on the card
+    return {
+        "toast": {
+            "type":    "success",
+            "content": "语言已设置 / Language set ✓",
+        }
+    }
 
 
 # ---------------------------------------------------------------------------
