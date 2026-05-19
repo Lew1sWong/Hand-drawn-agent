@@ -87,7 +87,11 @@ async def run_agent(
     logger.info("Executing plan: %s", plan_summary)
 
     if not plan:
-        raise ValueError("Planner returned an empty plan (0 steps). Try rephrasing your request.")
+        # Fallback: pick the safest single-step plan rather than crashing.
+        from planner import PlanStep
+        fallback_tool = "image_to_video" if "image_url" in available_assets else "text_to_video"
+        logger.warning("Planner returned empty plan — falling back to %s", fallback_tool)
+        plan = [PlanStep(tool=fallback_tool, reason="empty-plan fallback")]
 
     # 3. Execute
     initial_ctx: dict[str, Any] = {"user_description": user_request, **assets}

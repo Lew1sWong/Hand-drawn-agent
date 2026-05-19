@@ -82,31 +82,37 @@ Return a single JSON object with one key "steps" containing a list:
   ]
 }}
 
-=== Planning rules ===
+=== Planning rules (apply top-to-bottom, first match wins) ===
 1. Use only the tool names listed above — never invent new ones.
 2. "inputs" contains ONLY values the planner must set (e.g. duration, n_shots).
-   Do NOT include image_url, audio_url, video_url, or enhanced_prompt — they
-   are resolved automatically from context.
-3. Tool outputs are piped forward: a video_url produced by step N is available
-   as input to step N+1 automatically. figurine_to_anime overwrites image_url,
-   so any tool after it automatically uses the anime render.
-4. FIGURINE RULE — STRICT PRECONDITION: "image_url" MUST be in available assets.
-   IF "image_url" IS in available assets AND the user mentions figurine / figure /
-   手办 / toy / collectible → plan: figurine_to_anime → image_to_video (2 steps).
-   IF "image_url" is NOT in available assets → NEVER use figurine_to_anime, even
-   if the user says 手办. Use text_to_video for pure-text figurine requests.
-5. MULTI-SHOT RULE:
-   If the user provides a detailed script with multiple scenes, OR explicitly asks
-   for "多镜头", "多场景", "分镜", "multi-shot", or "multi-scene" → use multi_shot_video
-   (single step). Set n_shots to the number of distinct scenes (2–4).
-6. If "image_url" is NOT in available assets (and not multi-shot, not figurine) → use text_to_video.
-7. If "image_url" IS available and "audio_url" IS available → use audio_portrait.
-8. If "image_url" IS available and "audio_url" is NOT available:
-   - User wants character to speak/sing → plan: tts then audio_portrait (set tts_text in tts inputs).
-   - User wants silent animation → use image_to_video.
-9. tts always runs BEFORE audio_portrait; set tts_text to the words the character should say.
-10. Minimum 1 step, maximum 3 steps.
-11. Output ONLY the JSON object — no markdown, no extra commentary.
+   Do NOT include image_url, audio_url, video_url, or enhanced_prompt — the
+   executor resolves those automatically from context.
+3. Tool outputs are piped forward automatically. figurine_to_anime overwrites
+   image_url, so image_to_video after it picks up the anime render.
+
+4. NO IMAGE → text_to_video (always, no exceptions):
+   If "image_url" is NOT in available assets → use text_to_video, single step.
+   This applies even if the user mentions 手办 / figurine / figure — without an
+   uploaded photo there is nothing to convert.
+
+5. MULTI-SHOT (image_url NOT required):
+   User provides a multi-scene script OR says 多镜头 / 分镜 / multi-shot →
+   use multi_shot_video (single step, set n_shots = number of scenes, 2–4).
+
+6. FIGURINE + IMAGE → figurine_to_anime → image_to_video:
+   "image_url" IS in available assets AND user mentions 手办 / figurine / figure /
+   toy → 2-step plan: figurine_to_anime then image_to_video.
+
+7. IMAGE + AUDIO → audio_portrait (single step).
+
+8. IMAGE only, user wants speech/singing → tts then audio_portrait (2 steps,
+   set tts_text to the words the character should say).
+
+9. IMAGE only, silent animation → image_to_video (single step).
+
+10. tts must always run BEFORE audio_portrait.
+11. Minimum 1 step, maximum 3 steps.
+12. Output ONLY the JSON object — no markdown, no extra text.
 """
 
 
