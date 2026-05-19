@@ -692,27 +692,122 @@ for an animated video — run figurine_to_anime FIRST, then image_to_video."""
 # AddBGMTool  — merge narration / ambient audio into a silent video
 # ---------------------------------------------------------------------------
 
+async def _plan_audio(user_description: str, lang: str) -> dict:
+    """
+    Ask DeepSeek to decide whether the user wants ambient sound effects or a
+    voice-over narration, and produce the appropriate content.
+
+    Returns one of:
+      {"mode": "ambient",   "ambient_prompt": "<English sfx prompt>", "duration_s": <int>}
+      {"mode": "narration", "narration_text": "<script>", "voice": "<edge-tts voice>"}
+    """
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(
+        api_key=os.environ["DEEPSEEK_API_KEY"],
+        base_url="https://api.deepseek.com",
+    )
+    system = """\
+You are an audio director for short animated videos (4–8 seconds).
+Analyse the user's scene description and decide the best audio approach.
+
+Always return this JSON shape (all fields required):
+{
+  "mode": "ambient" | "narration",
+  "ambient_prompt": "<English sound-design prompt, 20–50 words, sounds only — required for ambient, empty string for narration>",
+  "duration_s": <integer 8–15, required for ambient, 0 for narration>,
+  "narration_text": "<1–3 sentence poetic scene narration in the user's language — ALWAYS fill this, it is used as TTS fallback if sfx generation fails>",
+  "voice": "<edge-tts voice name>"
+}
+
+Mode decision:
+- "ambient"   if user mentions: engine/motor sounds, animal sounds, nature sounds,
+  wind, background noise, atmosphere, music, sound effects
+  (音效 / 引擎声 / 背景声 / 环境音 / 风声 / 狗叫 / 鸟鸣)
+- "narration" if user mentions: voice-over, character speech, narration, reading text aloud
+  (配音 / 旁白 / 说话 / 朗读)
+
+Rules:
+- ambient_prompt MUST be in English, describe SOUNDS ONLY (not visuals)
+- narration_text is a POETIC SCENE NARRATION written by you — do NOT copy the user's raw
+  description. Imagine you are the narrator of a short film and write 1–3 sentences that
+  evoke the mood and atmosphere of the scene. This field is ALWAYS required.
+- Narration voices: zh-CN-XiaoxiaoNeural (zh ♀), zh-CN-YunxiNeural (zh ♂),
+  en-US-JennyNeural (en ♀), en-US-GuyNeural (en ♂)
+- Output ONLY the JSON object — no markdown, no explanation."""
+
+    resp = await client.chat.completions.create(
+        model="deepseek-chat",
+        max_tokens=256,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user",   "content": f"user_lang={lang}\n\n{user_description}"},
+        ],
+    )
+    raw = resp.choices[0].message.content.strip()
+    logger.info("[AddBGM] audio plan: %s", raw)
+    return json.loads(raw)
+
+
+async def _generate_ambient_audio(prompt: str, duration_s: int) -> bytes:
+    """
+    Generate ambient / sfx audio via Replicate stable-audio-open.
+    Returns raw WAV bytes.
+    """
+    import replicate
+    import requests as _req
+
+    api_token = os.environ.get("REPLICATE_API_TOKEN", "")
+    if api_token:
+        os.environ["REPLICATE_API_TOKEN"] = api_token
+
+    loop = asyncio.get_running_loop()
+    logger.info("[AddBGM] generating sfx  prompt=%s  duration=%ds", prompt[:80], duration_s)
+    output = await loop.run_in_executor(
+        None,
+        lambda: replicate.run(
+            "stability-ai/stable-audio-open",
+            input={
+                "prompt":        prompt,
+                "seconds_total": min(max(int(duration_s), 8), 47),
+                "steps":         50,
+            },
+        ),
+    )
+    audio_url = _replicate_to_url(output)
+    logger.info("[AddBGM] sfx ready  url=%s", audio_url)
+    r = _req.get(audio_url, timeout=120)
+    r.raise_for_status()
+    return r.content
+
+
 class AddBGMTool(BaseTool):
     """
     Post-processing step: adds audio to a silent generated video.
 
     Pipeline:
-      1. Download the video from ctx["video_url"] using requests
-      2. Synthesise narration from ctx["user_description"] with edge-tts
-      3. Loop the audio to match video duration and merge with ffmpeg
-      4. Serve the merged file via /media/ and overwrite video_url
+      0. LLM (DeepSeek) analyses the description → decides ambient sfx OR narration
+      1. Download the video from ctx["video_url"]
+      2a. Ambient mode  → Replicate stable-audio-open generates WAV sfx
+      2b. Narration mode → edge-tts synthesises voice-over
+      3. Loop audio to match video length and merge with ffmpeg
+      4. Serve merged file via /media/ and overwrite video_url
 
-    Requires ffmpeg to be installed on the server (brew install ffmpeg / apt install ffmpeg).
+    Requires ffmpeg (brew install ffmpeg / apt install ffmpeg).
     """
 
     name        = "add_bgm"
     description = """\
-Add narration audio to a silent video (image_to_video / text_to_video / multi_shot_video).
-Uses edge-tts to synthesise a voice-over from the scene description, then merges
-audio and video with ffmpeg. Overwrites video_url with the audio+video file.
+Add audio to a silent video (image_to_video / text_to_video / multi_shot_video).
 
-Add this as the LAST step of any plan that produces a silent video when the user
-asks for sound / 声音 / 配音 / 旁白 / narration / audio / music.
+Uses DeepSeek to understand WHAT kind of audio the user wants:
+- Ambient / sound effects (engine, wind, animals, music) → Replicate stable-audio-open
+- Voice-over / narration / dialogue → edge-tts
+
+Overwrites video_url with the audio+video file.
+
+Add this as the LAST step when the user asks for sound / 声音 / 配音 / 音效 / 旁白 /
+narration / audio / music / sound effects.
 Do NOT add this after audio_portrait — that tool already produces audio.
 
 Reads:  video_url, user_description, lang (optional, default zh)
@@ -724,8 +819,8 @@ Writes: video_url (the merged file served via /media/)"""
             "voice": {
                 "type": "string",
                 "description": (
-                    "edge-tts voice name override. "
-                    "Chinese: zh-CN-XiaoxiaoNeural (F, default), zh-CN-YunxiNeural (M). "
+                    "edge-tts voice override (narration mode only). "
+                    "Chinese: zh-CN-XiaoxiaoNeural (F), zh-CN-YunxiNeural (M). "
                     "English: en-US-JennyNeural (F), en-US-GuyNeural (M)."
                 ),
             },
@@ -742,37 +837,82 @@ Writes: video_url (the merged file served via /media/)"""
 
         text = ctx.get("user_description", "")
         if not text:
-            raise ValueError("[AddBGM] user_description is required for TTS narration")
+            raise ValueError("[AddBGM] user_description is required")
 
-        lang  = ctx.get("lang", "zh")
-        voice = ctx.get("voice") or (
+        lang          = ctx.get("lang", "zh")
+        default_voice = ctx.get("voice") or (
             "zh-CN-XiaoxiaoNeural" if lang == "zh" else "en-US-JennyNeural"
         )
 
-        uid       = uuid.uuid4().hex
-        audio_in  = Path(f"/tmp/bgm_audio_{uid}.mp3")
+        # ── Step 0: LLM audio planning ─────────────────────────────────────
+        try:
+            audio_plan = await _plan_audio(text, lang)
+        except Exception as exc:
+            logger.warning("[AddBGM] LLM planning failed (%s) — falling back to TTS", exc)
+            audio_plan = {
+                "mode": "narration",
+                "narration_text": text[:300],
+                "voice": default_voice,
+            }
+
+        mode = audio_plan.get("mode", "narration")
+        uid  = uuid.uuid4().hex
+
+        audio_suffix = ".wav" if mode == "ambient" else ".mp3"
+        audio_in  = Path(f"/tmp/bgm_audio_{uid}{audio_suffix}")
         video_in  = Path(f"/tmp/bgm_vid_in_{uid}.mp4")
         video_out = Path(f"/tmp/bgm_{uid}.mp4")
 
         try:
-            # ── Step 1: download silent video ─────────────────────────────
+            # ── Step 1: download silent video (in executor — non-blocking) ─
             logger.info("[AddBGM] downloading video  url=%s", video_url)
-            r = _req.get(video_url, timeout=120)
-            r.raise_for_status()
-            video_in.write_bytes(r.content)
-            logger.info("[AddBGM] video saved  size=%d bytes", len(r.content))
+            loop = asyncio.get_running_loop()
+            last_exc: Exception | None = None
+            for _attempt in range(3):
+                try:
+                    def _dl(u=video_url):
+                        resp = _req.get(u, timeout=120)
+                        resp.raise_for_status()
+                        return resp.content
+                    video_data = await loop.run_in_executor(None, _dl)
+                    break
+                except Exception as _e:
+                    last_exc = _e
+                    logger.warning("[AddBGM] video download attempt %d failed: %s", _attempt + 1, _e)
+                    if _attempt < 2:
+                        await asyncio.sleep(2 ** _attempt)
+            else:
+                raise RuntimeError(f"[AddBGM] video download failed after 3 attempts: {last_exc}")
+            video_in.write_bytes(video_data)
+            logger.info("[AddBGM] video saved  size=%d bytes", len(video_data))
 
-            # ── Step 2: synthesise narration ──────────────────────────────
-            narration = text[:400]          # edge-tts is reliable up to ~400 chars
-            logger.info("[AddBGM] TTS  voice=%s  text=%s", voice, narration[:60])
-            communicate = edge_tts.Communicate(narration, voice)
-            await communicate.save(str(audio_in))
-            logger.info("[AddBGM] TTS saved  size=%d bytes", audio_in.stat().st_size)
+            # ── Step 2: generate audio ─────────────────────────────────────
+            if mode == "ambient":
+                sfx_prompt = audio_plan.get("ambient_prompt", "ambient atmospheric sound")
+                duration   = int(audio_plan.get("duration_s", 12))
+                try:
+                    audio_bytes = await _generate_ambient_audio(sfx_prompt, duration)
+                    audio_in.write_bytes(audio_bytes)
+                    logger.info("[AddBGM] sfx saved  size=%d bytes", len(audio_bytes))
+                except Exception as exc:
+                    logger.warning("[AddBGM] sfx generation failed (%s) — falling back to TTS narration", exc)
+                    # Use the LLM-generated poetic narration, NOT the raw user description
+                    fallback_narration = audio_plan.get("narration_text", "")
+                    fallback_voice     = audio_plan.get("voice", default_voice)
+                    if not fallback_narration:
+                        fallback_narration = text[:200]
+                    audio_in = Path(f"/tmp/bgm_audio_{uid}.mp3")
+                    communicate = edge_tts.Communicate(fallback_narration, fallback_voice)
+                    await communicate.save(str(audio_in))
+            else:
+                narration = audio_plan.get("narration_text", text[:400])
+                voice     = audio_plan.get("voice", default_voice)
+                logger.info("[AddBGM] TTS  voice=%s  text=%s", voice, narration[:60])
+                communicate = edge_tts.Communicate(narration, voice)
+                await communicate.save(str(audio_in))
+                logger.info("[AddBGM] TTS saved  size=%d bytes", audio_in.stat().st_size)
 
-            # ── Step 3: ffmpeg merge ──────────────────────────────────────
-            # -stream_loop -1 : loop audio indefinitely
-            # -shortest       : stop when the video ends
-            # -c:v copy       : don't re-encode video (fast, lossless)
+            # ── Step 3: ffmpeg merge ───────────────────────────────────────
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(video_in),
@@ -785,13 +925,13 @@ Writes: video_url (the merged file served via /media/)"""
                 "-shortest",
                 str(video_out),
             ]
-            logger.info("[AddBGM] running ffmpeg")
+            logger.info("[AddBGM] running ffmpeg  mode=%s", mode)
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
             if proc.returncode != 0:
                 raise RuntimeError(f"[AddBGM] ffmpeg error:\n{proc.stderr[-800:]}")
             logger.info("[AddBGM] merge done  size=%d bytes", video_out.stat().st_size)
 
-            # ── Step 4: serve merged file ─────────────────────────────────
+            # ── Step 4: serve merged file ──────────────────────────────────
             out_name = f"bgm_{uid}.mp4"
             video_out.rename(Path(f"/tmp/{out_name}"))
             new_url = f"{PUBLIC_BASE_URL}/media/{out_name}"
@@ -799,7 +939,7 @@ Writes: video_url (the merged file served via /media/)"""
             return {"video_url": new_url, "has_audio": True}
 
         finally:
-            for p in (audio_in, video_in, video_out):
+            for p in (audio_in, video_in):
                 try:
                     p.unlink()
                 except FileNotFoundError:

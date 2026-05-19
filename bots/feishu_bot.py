@@ -275,6 +275,24 @@ def _download_sync(message_id: str, file_key: str, rtype: str) -> bytes:
     return resp.raw.content
 
 
+def _compress_image(data: bytes, max_px: int = 1280, quality: int = 85) -> bytes:
+    """Resize + JPEG-compress raw image bytes to keep file small for ngrok serving."""
+    from PIL import Image as PILImage
+    import io as _io
+    img = PILImage.open(_io.BytesIO(data))
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    if max(img.size) > max_px:
+        ratio = max_px / max(img.size)
+        img = img.resize(
+            (int(img.width * ratio), int(img.height * ratio)),
+            PILImage.LANCZOS,
+        )
+    buf = _io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
 async def _save_and_url(message_id: str, file_key: str, rtype: str, suffix: str) -> str:
     """Download a Feishu resource, save to /tmp, return a public URL via /media/."""
     loop = asyncio.get_event_loop()
@@ -283,10 +301,24 @@ async def _save_and_url(message_id: str, file_key: str, rtype: str, suffix: str)
     )
     if not data:
         raise RuntimeError("Feishu returned empty file — download may have failed silently")
-    fname = f"feishu_{uuid.uuid4().hex}{suffix}"
-    path  = Path(f"/tmp/{fname}")
+
+    uid = uuid.uuid4().hex
+    # Compress images so they reliably transfer through ngrok to Volcengine
+    if suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+        try:
+            orig_size = len(data)
+            data  = await loop.run_in_executor(_executor, _compress_image, data)
+            fname = f"feishu_{uid}.jpg"
+            logger.info("Image compressed %d → %d bytes", orig_size, len(data))
+        except Exception as exc:
+            logger.warning("Image compression failed (%s) — using original", exc)
+            fname = f"feishu_{uid}{suffix}"
+    else:
+        fname = f"feishu_{uid}{suffix}"
+
+    path = Path(f"/tmp/{fname}")
     path.write_bytes(data)
-    logger.info("Saved %s  size=%d bytes  url=%s/media/%s", suffix, len(data), PUBLIC_BASE_URL, fname)
+    logger.info("Saved  size=%d bytes  url=%s/media/%s", len(data), PUBLIC_BASE_URL, fname)
     return f"{PUBLIC_BASE_URL}/media/{fname}"
 
 
@@ -483,7 +515,6 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
         # ② Add audio to the existing video
         if any(w in text for w in _BGM_WORDS):
             video_url = state.get("last_video_url")
-            prompt    = state.get("last_prompt", "")
             if not video_url:
                 await _send(chat_id, _t(open_id,
                     "找不到上一个视频，请重新生成。",
@@ -496,7 +527,10 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
             ))
             try:
                 from tools import AddBGMTool
-                bgm_ctx = {"video_url": video_url, "user_description": prompt, "lang": lang}
+                # Pass the user's CURRENT audio request as user_description so
+                # the LLM in AddBGMTool sees the sound-design brief, not the
+                # original scene description.
+                bgm_ctx = {"video_url": video_url, "user_description": text, "lang": lang}
                 bgm_out = await AddBGMTool().run(bgm_ctx)
                 new_url = bgm_out["video_url"]
                 await _send(chat_id, _t(open_id,
@@ -504,7 +538,8 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
                     f"🎬 Narration added!\n\n🔗 {new_url}",
                 ))
                 _set_state(open_id, _S_WAIT_RATING,
-                           last_prompt=prompt, last_video_url=new_url,
+                           last_prompt=state.get("last_prompt", ""),
+                           last_video_url=new_url,
                            last_assets=state.get("last_assets", {}), lang=lang)
                 await _send(chat_id, _rating_prompt(open_id))
             except Exception as exc:

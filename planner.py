@@ -82,6 +82,14 @@ Return a single JSON object with one key "steps" containing a list:
   ]
 }}
 
+=== CRITICAL — Image presence override (read this first) ===
+If "image_url" IS listed in the Available context assets above, the user has uploaded
+a photo or sketch and MUST have it animated. You MUST use image_to_video (or
+figurine_to_anime → image_to_video for figurines) as the video-generation step.
+NEVER substitute text_to_video when image_url is present — even if the user writes a
+long visual description. That description tells you HOW to animate their image, not
+what to generate from scratch. Violating this rule throws away the user's upload.
+
 === Planning rules (apply top-to-bottom, first match wins) ===
 1. Use only the tool names listed above — never invent new ones.
 2. "inputs" contains ONLY values the planner must set (e.g. duration, n_shots).
@@ -114,7 +122,9 @@ Return a single JSON object with one key "steps" containing a list:
 9. IMAGE only, user wants speech/singing → tts then audio_portrait (2 steps,
    set tts_text to the words the character should say).
 
-10. IMAGE only, silent animation → image_to_video (single step).
+10. IMAGE only → image_to_video:
+    "image_url" IS in available assets → image_to_video. No exceptions.
+    (add_bgm appended per rule 4 if sound is requested.)
 
 11. tts must always run BEFORE audio_portrait.
 12. Minimum 1 step, maximum 4 steps (add_bgm may be appended as a final step).

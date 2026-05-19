@@ -1,62 +1,124 @@
-# 手绘动画 AI Agent — 功能介绍
-# Hand-Drawn Animation AI Agent — Feature Guide
+# 手绘动画 AI Agent — 功能全览
+# Hand-Drawn Animation AI Agent — Complete Feature Guide
 
 ---
 
 ## 目录 / Contents
 
-1. [视频生成 / Video Generation](#1-视频生成--video-generation)
-2. [多镜头生成 / Multi-Shot Generation](#2-多镜头生成--multi-shot-generation)
-3. [口播数字人 / Talking-Head (OmniHuman)](#3-口播数字人--talking-head-omnihuman)
-4. [文字转语音 / Text-to-Speech](#4-文字转语音--text-to-speech)
-5. [电影级运镜 / Cinematic Camera Language](#5-电影级运镜--cinematic-camera-language)
-6. [飞书机器人 / Feishu Bot](#6-飞书机器人--feishu-bot)
-7. [取消指令 / Cancel Command](#7-取消指令--cancel-command)
-8. [评分反馈 / Rating & Feedback](#8-评分反馈--rating--feedback)
-9. [三层记忆系统 / Three-Tier Memory System](#9-三层记忆系统--three-tier-memory-system)
-10. [架构概览 / Architecture Overview](#10-架构概览--architecture-overview)
+1. [唤醒与语言选择 / Wake & Language](#1-唤醒与语言选择--wake--language)
+2. [视频生成模式 / Video Generation Modes](#2-视频生成模式--video-generation-modes)
+3. [手办转动漫 / Figurine → Anime](#3-手办转动漫--figurine--anime)
+4. [多镜头生成 / Multi-Shot Generation](#4-多镜头生成--multi-shot-generation)
+5. [口播数字人 / Talking-Head Portrait](#5-口播数字人--talking-head-portrait)
+6. [视频配音 / Add Narration to Video](#6-视频配音--add-narration-to-video)
+7. [文字转语音 / Text-to-Speech](#7-文字转语音--text-to-speech)
+8. [电影级运镜 / Cinematic Camera Language](#8-电影级运镜--cinematic-camera-language)
+9. [后期处理框架 / Post-Production Commands](#9-后期处理框架--post-production-commands)
+10. [取消与重置 / Cancel & Reset](#10-取消与重置--cancel--reset)
+11. [评分反馈 / Rating & Feedback](#11-评分反馈--rating--feedback)
+12. [三层记忆系统 / Three-Tier Memory](#12-三层记忆系统--three-tier-memory)
+13. [架构概览 / Architecture Overview](#13-架构概览--architecture-overview)
 
 ---
 
-## 1. 视频生成 / Video Generation
+## 1. 唤醒与语言选择 / Wake & Language
 
 ### 中文
 
-本 Agent 支持三种视频生成模式：
+发送任意唤醒词即可启动 Agent，并弹出交互式语言选择卡片：
 
-| 模式 | 触发方式 | 说明 |
-|------|----------|------|
-| **图生视频** | 发送草图 + 文字描述 | 将手绘草图动画化，最长 8 秒 |
-| **文生视频** | 仅发送文字描述 | 无需图片，直接从描述生成视频 |
-| **多镜头视频** | 发送含多场景的脚本 | 自动生成 2–4 个独立片段（见第 2 节）|
+> `hello` · `hi` · `你好` · `嗨` · `开始` · `start` · `help` · `帮助`
 
-底层调用火山引擎即梦 AI（`jimeng_ti2v_v30_pro`），分辨率默认 1280×720，时长默认 4 秒（可设置为 8 秒）。
+卡片提供两个按钮：**🇨🇳 中文** / **🇬🇧 English**，点击后所有后续回复切换为对应语言。
+
+发送 `exit` · `退出` · `重置` · `reset` 可随时清空状态、重新选择语言。
 
 ### English
 
-The agent supports three video generation modes:
+Send any wake word to start the agent and display the interactive language-selection card:
 
-| Mode | Trigger | Description |
-|------|---------|-------------|
-| **Image-to-Video** | Send sketch + text description | Animates a hand-drawn sketch, up to 8 seconds |
-| **Text-to-Video** | Send text description only | Generates video directly from text, no image needed |
-| **Multi-Shot** | Send a multi-scene script | Auto-generates 2–4 independent clips (see Section 2) |
+> `hello` · `hi` · `hey` · `你好` · `start` · `help`
 
-Powered by Volcengine JiMeng AI (`jimeng_ti2v_v30_pro`). Default resolution: 1280×720, default duration: 4 s (configurable up to 8 s).
+Click **🇨🇳 中文** or **🇬🇧 English** — all subsequent bot replies switch to that language.
+
+Type `exit` · `退出` · `reset` at any time to clear state and reselect language.
 
 ---
 
-## 2. 多镜头生成 / Multi-Shot Generation
+## 2. 视频生成模式 / Video Generation Modes
 
 ### 中文
 
-当用户发送包含多个场景的脚本（或明确要求"多镜头"、"分镜"、"multi-shot"）时，Planner 自动选择 `multi_shot_video` 工具。
+| 模式 | 触发方式 | 底层工具 |
+|------|----------|----------|
+| **图生视频** | 发图片 → 发描述 | `image_to_video` |
+| **文生视频** | 仅发文字描述 | `text_to_video` |
+| **多镜头** | 多场景脚本 / "多镜头" | `multi_shot_video` |
+| **手办转动漫** | 发手办图片 → 发描述 | `figurine_to_anime → image_to_video` |
+| **口播视频** | 图片 + 音频 / 对话文字 | `tts → audio_portrait` |
+
+所有模式均使用火山引擎即梦 AI（`jimeng_ti2v_v30_pro`），默认分辨率 1280×720，时长 4 秒（可设 8 秒）。
+
+### English
+
+| Mode | Trigger | Under the hood |
+|------|---------|----------------|
+| **Image-to-Video** | Send image → send description | `image_to_video` |
+| **Text-to-Video** | Send text description only | `text_to_video` |
+| **Multi-Shot** | Multi-scene script / "multi-shot" | `multi_shot_video` |
+| **Figurine → Anime** | Send figurine photo → send description | `figurine_to_anime → image_to_video` |
+| **Talking Portrait** | Image + audio / dialogue text | `tts → audio_portrait` |
+
+All modes use Volcengine JiMeng AI. Default: 1280×720, 4 s (up to 8 s).
+
+---
+
+## 3. 手办转动漫 / Figurine → Anime
+
+### 中文
+
+上传 Q 版手办照片并发送描述，Agent 自动走两步 Replicate 流水线：
+
+1. **depth-anything-v2-large** — 提取深度图，保留手办的 3D 立体结构
+2. **SDXL ControlNet (depth)** — 以深度图为条件，将手办渲染为 2D 动漫风格，保留颜色、服装、发型
+
+转换后的动漫图自动传入 `image_to_video`，生成动画视频。
+
+**所需配置：**
+```env
+REPLICATE_API_TOKEN=r8_xxx
+```
+
+**示例触发：**
+```
+（发送手办照片）
+把这个手办做成动漫动画，背景是江湖酒馆
+```
+
+### English
+
+Upload a Q-version figurine photo and send a description. The agent runs a two-step Replicate pipeline:
+
+1. **depth-anything-v2-large** — extracts a depth map, preserving the figurine's 3-D volume
+2. **SDXL ControlNet (depth)** — renders in 2-D anime style, preserving colours, outfit, and hair
+
+The anime render is automatically piped into `image_to_video` to produce the final animation.
+
+**Requires:** `REPLICATE_API_TOKEN` in `.env`.
+
+---
+
+## 4. 多镜头生成 / Multi-Shot Generation
+
+### 中文
+
+发送含多个场景的脚本，或在描述中包含"多镜头"、"分镜"、"multi-shot"，Planner 自动选择 `multi_shot_video`。
 
 **工作流程：**
-1. DeepSeek 将用户脚本拆解为 2–4 个独立场景描述
-2. 每个场景自动注入专属运镜语言（推拉摇移、景深、光效）
-3. 所有片段**并行**提交至火山引擎，节省等待时间
-4. 生成完成后依次返回各镜头链接
+1. DeepSeek 将脚本拆解为 2–4 个独立场景描述
+2. 每个场景自动注入专属运镜与光效
+3. 所有片段**并行**提交火山引擎，节省等待时间
+4. 返回所有片段链接，按镜头编号排列
 
 **示例输入：**
 ```
@@ -68,318 +130,312 @@ Powered by Volcengine JiMeng AI (`jimeng_ti2v_v30_pro`). Default resolution: 128
 **示例输出：**
 ```
 🎬 多镜头视频生成完成！(3 个片段)
-
   🎞️ 第1镜：https://...
   🎞️ 第2镜：https://...
   🎞️ 第3镜：https://...
-
-Pipeline: multi_shot_video
 ```
 
 ### English
 
-When the user sends a detailed multi-scene script, or explicitly requests "multi-shot", "multi-scene", or "分镜", the Planner automatically selects the `multi_shot_video` tool.
+Send a multi-scene script or use the keywords "multi-shot", "multi-scene", or "分镜". The planner selects `multi_shot_video` automatically.
 
-**Workflow:**
-1. DeepSeek parses the user's script into 2–4 independent scene prompts
-2. Each scene gets a unique cinematic camera move injected automatically
-3. All clips are submitted to Volcengine **in parallel** to save time
-4. All clip URLs are returned once generation completes
+**Workflow:** DeepSeek splits the script into 2–4 scenes → each gets a unique camera move → all clips submitted to Volcengine **in parallel** → all URLs returned at once.
 
-**Tip:** You can set `n_shots` (2–4) explicitly in your description. Failed individual clips are skipped gracefully — the rest still deliver.
+Individual clip failures are handled gracefully — the remaining clips still deliver.
 
 ---
 
-## 3. 口播数字人 / Talking-Head (OmniHuman)
+## 5. 口播数字人 / Talking-Head Portrait
 
 ### 中文
 
-基于火山引擎 OmniHuman 1.5，将一张人像照片与音频结合，生成口型同步的说话视频。
+基于火山引擎 OmniHuman 1.5，将人像照片与音频结合，生成口型同步视频。
 
-**两种使用方式：**
-- **自带音频**：发送图片 → 发送音频文件 → 发送描述，直接驱动口播
-- **TTS 口播**：发送图片 → 发送描述（包含人物要说的话），Agent 自动合成语音再驱动
+**两种触发方式：**
 
-**所需服务激活：**
-- 火山引擎控制台 → 即梦 AI → OmniHuman 1.5 → 确认状态「已开通」
+| 方式 | 流程 |
+|------|------|
+| **自带音频** | 发图片 → 发音频文件 → 发描述 |
+| **TTS 驱动** | 发图片 → 发描述（包含人物要说的话）|
 
-> ⚠️ 若遇到 504 超时，说明 OmniHuman 服务未完全激活，请联系火山引擎商务开通。
+TTS 方式由 Agent 自动合成语音（edge-tts），再驱动 OmniHuman，全程无需手动录音。
+
+> ⚠️ 需在火山引擎控制台激活 OmniHuman 1.5 服务。
 
 ### English
 
-Powered by Volcengine OmniHuman 1.5, combines a portrait photo with audio to produce a lip-synced talking-head video.
+Powered by Volcengine OmniHuman 1.5. Combines a portrait photo with audio to produce a lip-synced video.
 
-**Two usage patterns:**
-- **With your own audio:** Send image → send audio file → send description
-- **TTS-driven lip sync:** Send image → send description with dialogue text; the agent auto-generates speech and drives the portrait
+| Mode | Flow |
+|------|------|
+| **With own audio** | Send image → send audio file → send description |
+| **TTS-driven** | Send image → send description with dialogue |
 
-**Requires:** OmniHuman 1.5 activated in the Volcengine console (即梦 AI → 数字人 → 服务开通).
+In TTS mode, the agent auto-generates speech via edge-tts and feeds it directly to OmniHuman — no manual recording needed.
 
 ---
 
-## 4. 文字转语音 / Text-to-Speech
+## 6. 视频配音 / Add Audio to Video
 
 ### 中文
 
-使用 `edge-tts`（微软免费 TTS，无需 API Key）将文字合成为音频，再用于口播数字人驱动。
+视频生成后，回复「**加配音**」并描述想要的声音，Agent 自动识别意图并生成对应音频，无需重新生成视频。
 
-**支持音色：**
+**工作流程：**
+1. **LLM 意图分析**：DeepSeek 读取用户的音效需求，判断是「氛围音效」还是「旁白配音」
+2. **音频生成（双路径）：**
+   - **氛围音效模式**（引擎声、动物声、环境音）→ Replicate `stable-audio-open` 生成 WAV 音效
+   - **旁白模式**（配音、旁白、对话）→ `edge-tts` 合成语音旁白
+3. `ffmpeg` 将音频循环填充至视频时长后混合
+4. 返回带音频的新视频链接
 
-| 音色名 | 特点 |
-|--------|------|
-| `zh-CN-XiaoxiaoNeural` | 女声，普通话，默认 |
-| `zh-CN-YunxiNeural` | 男声，普通话 |
+**触发关键词：**
+> `加配音` · `加声音` · `加音乐` · `加旁白` · `音效` · `配音` · `add audio` · `add narration`
+
+**示例：**
+```
+加声音：摩托车引擎声，低沉匀速，带轻微转速起伏；
+边车小狗偶尔汪一声，短促软乎。
+→ 自动生成引擎+狗叫氛围音，混入视频
+```
+
+**所需环境：** `ffmpeg` + `REPLICATE_API_TOKEN`（氛围音效模式）
+
+### English
+
+After receiving a video, reply with "**add audio**" and describe the sound you want. The agent automatically identifies your intent and generates the appropriate audio.
+
+**Pipeline:**
+1. **LLM intent analysis**: DeepSeek reads your audio request and decides the mode
+2. **Audio generation (two paths):**
+   - **Ambient / SFX mode** (engine, animals, environment) → Replicate `stable-audio-open` generates WAV
+   - **Narration mode** (voice-over, dialogue) → `edge-tts` synthesises speech
+3. `ffmpeg` loops audio to match video duration and merges
+4. Returns new video URL with audio
+
+**Trigger keywords:** `加配音` · `add audio` · `add narration` · `sound effects` · `narrate`
+
+**Requires:** `ffmpeg` + `REPLICATE_API_TOKEN` (for ambient SFX mode).
+
+---
+
+## 7. 文字转语音 / Text-to-Speech
+
+### 中文
+
+使用 `edge-tts`（微软免费神经网络 TTS，无需 API Key）合成语音。
+
+| 音色 | 特点 |
+|------|------|
+| `zh-CN-XiaoxiaoNeural` | 中文女声（默认）|
+| `zh-CN-YunxiNeural` | 中文男声 |
 | `en-US-JennyNeural` | 英文女声 |
+| `en-US-GuyNeural` | 英文男声 |
 
-**在 Planner 中的配置：**
-```json
-{
-  "tool": "tts",
-  "inputs": {
-    "tts_text": "江湖再见，小白！",
-    "voice": "zh-CN-XiaoxiaoNeural"
-  }
-}
-```
+TTS 在以下场景自动触发：口播视频（无音频文件时）、视频配音（`add_bgm` 工具）。
 
 ### English
 
-Uses `edge-tts` (Microsoft free TTS, no API key required) to synthesize speech, which then drives the OmniHuman portrait animation.
+Uses `edge-tts` (Microsoft free neural TTS, no API key needed) for speech synthesis.
 
-The TTS tool is automatically planned before `audio_portrait` when the user wants the character to speak but provides no audio file. The generated `.mp3` is served via the `/media/` endpoint and consumed directly by the portrait tool.
+TTS is automatically triggered in two scenarios: talking-head generation (when no audio file is provided) and video narration via the `add_bgm` tool.
 
 ---
 
-## 5. 电影级运镜 / Cinematic Camera Language
+## 8. 电影级运镜 / Cinematic Camera Language
 
 ### 中文
 
-所有视频生成前，用户描述都经过 DeepSeek 增强为专业的电影提示词，包含：
+所有视频生成前，用户描述经 DeepSeek 增强为专业电影提示词：
 
-**运镜类型（每个视频自动选择一种）：**
-- `slow push-in` 缓慢推进
-- `gentle pull-back` 缓慢拉远
-- `smooth pan left/right` 横向摇镜
-- `overhead crane shot descending` 俯冲航拍
-- `low-angle tracking shot` 低角度跟拍
-- `rack focus` 焦点拉伸（前景→背景）
-- `static wide shot` 静止全景
+**运镜（每个视频自动选一种）：**
+- `slow push-in` 缓推 · `gentle pull-back` 缓拉 · `smooth pan left/right` 横摇
+- `overhead crane shot descending` 俯冲航拍 · `low-angle tracking shot` 低角跟拍
+- `rack focus` 焦点拉伸 · `static wide shot` 静止全景 · `handheld close-up` 手持特写
 
-**光影类型（自动匹配场景氛围）：**
-- `golden-hour rim light` 黄金时段轮廓光
-- `soft dappled light through leaves` 林间碎光
-- `dramatic side-lighting` 戏剧性侧光
-- `misty volumetric fog` 雾气氛围
-- `moonlit silhouette` 月光剪影
-- `warm lantern glow` 暖色灯笼光
+**光影（自动匹配场景氛围）：**
+- `golden-hour rim light` 黄金时段 · `soft dappled light through leaves` 林间碎光
+- `dramatic side-lighting` 戏剧侧光 · `misty volumetric fog` 体积雾
+- `moonlit silhouette` 月光剪影 · `warm lantern glow` 灯笼暖光
 
-所有提示词以 `"Hand-drawn animation style, 2D sketch art,"` 开头，以 `"consistent line-art aesthetic, fluid animation."` 结尾，保证风格一致。
+提示词统一以 `"Hand-drawn animation style, 2D sketch art,"` 开头，保证风格一致。
 
 ### English
 
-Before every video generation, user descriptions are enhanced by DeepSeek into professional cinematic prompts, including:
+Before every video generation, user descriptions are enhanced by DeepSeek into professional cinematic prompts with auto-selected camera move and lighting.
 
-**Auto-selected camera move** (one per video):
-push-in, pull-back, pan, crane, tracking shot, rack focus, or static wide.
+**Camera moves:** push-in, pull-back, pan, crane, tracking, rack focus, static wide, handheld close-up.
 
-**Auto-matched lighting** (based on scene mood):
-golden-hour rim light, dappled forest light, dramatic side-lighting, volumetric fog, moonlit silhouette, or warm lantern glow.
+**Lighting:** golden-hour, dappled forest, dramatic side-lighting, volumetric fog, moonlit silhouette, lantern glow.
 
-All prompts are framed as `"Hand-drawn animation style, 2D sketch art, …, consistent line-art aesthetic, fluid animation."` to guarantee visual coherence across shots.
+All prompts open with `"Hand-drawn animation style, 2D sketch art,"` for visual coherence.
 
 ---
 
-## 6. 飞书机器人 / Feishu Bot
+## 9. 后期处理框架 / Post-Production Commands
 
 ### 中文
 
-通过飞书（Lark）即可使用全部功能，无需命令行。
-
-**对话流程：**
+视频交付后进入后期模式，支持四类操作，无需重新上传图片：
 
 ```
-用户                          Bot
- |                             |
- |── 发送图片 ──────────────▶ ✅ 收到草图，请发描述（或先发音频）
- |                             |
- |── (可选) 发送音频 ────────▶ 🎵 收到音频，请发描述
- |                             |
- |── 发送文字描述 ──────────▶ ⏳ 生成中... (每30秒进度提醒)
- |                             |
- |                            🎬 视频链接
- |                             |
- |                            ⭐ 请打分 1-5
- |                             |
- |── 回复数字 ───────────────▶ 谢谢反馈！
-```
+🎬 视频已生成！
+🔗 https://...
 
-**支持消息类型：**
-- `image` — 草图/照片
-- `audio` / `file` — 音频驱动口播
-- `text` — 描述文字
-- `post` — 飞书富文本（多行格式化文本，如脚本）
-
-**环境变量配置：**
-```env
-FEISHU_APP_ID=cli_xxx
-FEISHU_APP_SECRET=xxx
-FEISHU_VERIFICATION_TOKEN=xxx
-PUBLIC_BASE_URL=https://your-server.com
-```
-
-### English
-
-All features are accessible via the Feishu (Lark) bot — no CLI required.
-
-**Supported message types:** image, audio/file, plain text, and rich-text "post" messages (multi-line scripts).
-
-**Progress updates** are sent every 30 seconds during generation. **Multi-shot** results display all clip URLs numbered by shot.
-
-**Setup:** Create an Enterprise Internal App in open.feishu.cn, grant `im:message:send_as_bot` + `im:resource` scopes, subscribe to `im.message.receive_v1`, and set the webhook URL to `https://your-server.com/feishu/event`.
-
----
-
-## 7. 取消指令 / Cancel Command
-
-### 中文
-
-在视频生成过程中，随时发送以下任意关键词可立即中止任务：
-
-> `取消` `停止` `停` `不要了` `算了` `stop` `cancel`
-
-中止后状态重置，可立即开始新的创作。
-
-### English
-
-During generation, send any of the stop keywords to cancel immediately:
-
-> `取消` `停止` `停` `不要了` `算了` `stop` `cancel`
-
-The task is cancelled via `asyncio.Task.cancel()`, state resets to idle, and you can start a new request right away.
-
----
-
-## 8. 评分反馈 / Rating & Feedback
-
-### 中文
-
-每次视频生成完成后，Bot 会询问：
-
-```
 ⭐ 请给这个视频打分（回复 1–5）
 1=很差  3=还可以  5=非常满意
+
+💡 也可以回复：加配音 · 重新生成 · 发新图/描述继续创作
 ```
 
-评分映射到 Memory 质量权重：
+| 用户回复 | 行为 |
+|----------|------|
+| `1`–`5` | 打分，记入记忆系统 |
+| `加配音` / `配音` | 对当前视频添加旁白，返回带音频版本 |
+| `重新生成` / `重做` | 用相同图片+描述重新生成 |
+| 其他文字 / 新图片 | 开始全新创作 |
+
+### English
+
+After video delivery, the bot enters post-production mode — no re-upload needed:
+
+| Reply | Action |
+|-------|--------|
+| `1`–`5` | Rate the video, saved to memory |
+| `add audio` / `narrate` | Add narration to the current video |
+| `regenerate` / `redo` | Re-run with the same image + prompt |
+| Anything else | Start a new creation |
+
+---
+
+## 10. 取消与重置 / Cancel & Reset
+
+### 中文
+
+**取消生成中的任务：**
+> `取消` · `停止` · `停` · `不要了` · `算了` · `stop` · `cancel`
+
+**重置全部状态（重新选择语言）：**
+> `exit` · `退出` · `重置` · `reset` · `/start`
+
+重置会同时取消正在进行的生成任务，清空所有对话状态，回到初始欢迎卡片。
+
+### English
+
+**Cancel an ongoing generation:**
+> `取消` · `停止` · `stop` · `cancel` · `不要了`
+
+**Full reset (re-select language):**
+> `exit` · `退出` · `reset` · `/start`
+
+Reset cancels any running task, clears all conversation state, and shows the welcome card again.
+
+---
+
+## 11. 评分反馈 / Rating & Feedback
+
+### 中文
+
+评分（1–5）映射为记忆质量权重，影响记忆优先级：
 
 | 评分 | 质量权重 | 含义 |
 |------|----------|------|
-| 5 ⭐ | 1.0 | 完全符合预期 |
-| 4 ⭐ | 0.8 | 比较满意 |
-| 3 ⭐ | 0.6 | 可以接受 |
-| 2 ⭐ | 0.2 | 不太满意 |
-| 1 ⭐ | 0.1 | 很差 |
-| 未评分 | 0.5 | 中性默认值 |
+| ⭐⭐⭐⭐⭐ 5 | 1.0 | 完全符合预期 |
+| ⭐⭐⭐⭐ 4 | 0.8 | 比较满意 |
+| ⭐⭐⭐ 3 | 0.6 | 可以接受 |
+| ⭐⭐ 2 | 0.2 | 不太满意 |
+| ⭐ 1 | 0.1 | 很差 |
 
-> 低分记忆**不会立刻删除**，而是在优先级竞争中自然淘汰，保留失败教训。
+低分记忆不会立刻删除，而是在优先级竞争中自然淘汰，保留失败教训供系统学习。
 
 ### English
 
-After each video delivery, the bot asks for a 1–5 star rating. Ratings are converted to a quality weight (0.1–1.0) stored in the memory entry. Low-rated entries are not deleted immediately — they compete fairly in the priority queue and are naturally evicted over time, preserving the "failure lesson" until it's no longer needed.
+Ratings (1–5) map to quality weights that drive memory priority. Low-rated entries are not deleted immediately — they decay naturally via the priority formula, preserving failure lessons until they're no longer relevant.
 
 ---
 
-## 9. 三层记忆系统 / Three-Tier Memory System
+## 12. 三层记忆系统 / Three-Tier Memory
 
 ### 中文
 
-借鉴操作系统存储层次设计，实现了一套优先级驱逐 + LLM 蒸馏的记忆系统：
+参考操作系统存储层次设计，实现优先级驱逐 + LLM 蒸馏的三层记忆：
 
 ```
-L1  distilled_style   — 高密度风格摘要，始终注入 Planner Prompt
-L2  working[]         — ≤ 20 条工作记忆，优先级排序
-L3  archive[]         — 无限量归档，LLM 定期压缩
+L1  distilled_style  — 风格摘要（2-3句话），每次 Planner 调用必注入
+L2  working[]        — ≤ 20 条工作记忆，优先级排序
+L3  archive[]        — 无限量归档，LLM 定期压缩
 ```
 
 **优先级公式：**
-
 ```
-priority = 0.35 × freshness(t) + 0.30 × freq_score + 0.35 × quality
+priority = 0.35 × freshness + 0.30 × freq_score + 0.35 × quality
 
-freshness = e^(-λt)         λ = ln(2)/24h，半衰期 24 小时
-freq_score = log(n+1)/log(20)  log 平滑，避免高频条目垄断
-quality    = 用户评分映射值（0.1–1.0）
-```
-
-**驱逐流程（类比 OS 页面置换）：**
-
-```
-L2 满（>20条）
-    ↓
-找 min(priority) 的未锁定条目
-    ↓
-移至 L3 Archive
-    ↓  L3 ≥ 30 条
-LLM 压缩为 3-5 条精华
-    ↓
-回填 L2（promote）
+freshness  = e^(-λt)               半衰期 24 小时，类 LRU
+freq_score = log(n+1) / log(20)    对数平滑，类 LFU
+quality    = 用户评分映射（0.1–1.0）
 ```
 
-**L1 蒸馏触发：**
-每积累 5 个质量 ≥ 0.6 的工作记忆，DeepSeek 自动提炼用户视觉风格偏好，更新 `distilled_style`，直接注入未来所有 Planner 调用，越用越精准。
+**驱逐与蒸馏：**
+- L2 满（> 20 条）→ 最低优先级条目移至 L3 归档
+- L3 ≥ 30 条 → DeepSeek 压缩为 3-5 条精华，回填 L2
+- 每积累 5 个质量 ≥ 0.6 的 L2 条目 → DeepSeek 提炼 `distilled_style`（L1）
 
-**Pin 功能（类比 OS mlock）：**
-重要记忆可设为 `pinned=True`，优先级无限大，永不被驱逐。
+**Pin 功能：** 重要记忆可设 `pinned=True`，优先级无限大，永不驱逐。
 
 ### English
 
-Inspired by OS memory hierarchy, the agent implements a three-tier priority-managed memory system:
+Inspired by OS memory hierarchy — three tiers with priority eviction and LLM distillation:
 
 ```
-L1  distilled_style   — compact style summary, always injected into Planner
-L2  working[]         — ≤ 20 MemoryEntry items, priority-sorted
-L3  archive[]         — unlimited, LLM-compressed periodically
+L1  distilled_style  — 2-3 sentence style summary, injected into every Planner call
+L2  working[]        — ≤ 20 entries, priority-sorted
+L3  archive[]        — unlimited, LLM-compressed periodically
 ```
 
-**Priority formula:**
-```
-priority = 0.35 × freshness + 0.30 × freq_score + 0.35 × quality
-```
+**Priority formula:** `0.35 × freshness + 0.30 × freq_score + 0.35 × quality`
 
-- **Freshness** decays exponentially (half-life = 24 h) — like LRU
-- **Frequency** is log-smoothed (like LFU, avoids monopoly)
-- **Quality** comes from user ratings — the unique human feedback signal
+- **Freshness**: exponential decay, 24 h half-life (LRU-like)
+- **Frequency**: log-smoothed access count (LFU-like, prevents monopoly)
+- **Quality**: user rating (the unique human-feedback signal)
 
-**Eviction:** When L2 is full, the lowest-priority unpinned entry is moved to L3. When L3 reaches 30 entries, LLM compresses the archive into 3–5 high-value insight entries and promotes them back to L2.
+**Eviction:** L2 full → lowest-priority entry → L3. L3 ≥ 30 → LLM compresses to 3-5 insights → back to L2.
 
-**Distillation:** Every 5 high-quality (≥ 0.6) L2 entries trigger a DeepSeek call that synthesises a 2–3 sentence style summary (`distilled_style`). This is injected into every future Planner prompt as L1 — making the agent progressively smarter the more you use it.
-
-**Pin (like OS mlock):** Critical entries can be pinned (`pinned=True`) — their priority is `∞` and they are never evicted.
+**Distillation:** Every 5 high-quality L2 entries trigger a DeepSeek call that synthesises a style summary into L1 — the agent gets progressively smarter with use.
 
 ---
 
-## 10. 架构概览 / Architecture Overview
+## 13. 架构概览 / Architecture Overview
 
 ```
-用户 (飞书) ──▶ feishu_bot.py ──▶ agent.py
-                    │                  │
-                    │              planner.py (DeepSeek)
-                    │                  │
-                    │              executor.py
-                    │                  │
-                    │         ┌────────┴────────────────┐
-                    │     tools.py                  memory.py
-                    │   ┌──────────────┐          ┌──────────────┐
-                    │   │ image_to_video│          │ L1 distilled │
-                    │   │ text_to_video │          │ L2 working[] │
-                    │   │ multi_shot   │          │ L3 archive[] │
-                    │   │ tts          │          └──────────────┘
-                    │   │ audio_portrait│
-                    │   └──────────────┘
-                    │
-              api.py (FastAPI)
-              /feishu/event  ← 火山引擎 Webhook
-              /media/{file}  ← TTS & 飞书下载文件服务
+用户 (飞书)
+    │
+    ▼
+feishu_bot.py  ──── 语言选择卡片 (POST /feishu/card)
+    │                后期处理: 加配音 / 重新生成
+    │
+    ▼
+agent.py  (orchestrator)
+    ├── memory.py        L1/L2/L3 三层记忆
+    ├── planner.py       DeepSeek → JSON 执行计划
+    └── executor.py      逐步执行 + 兜底逻辑
+            │
+            ▼
+        tools.py
+        ┌─────────────────────┐
+        │ image_to_video      │  火山引擎 JiMeng
+        │ text_to_video       │  火山引擎 JiMeng
+        │ multi_shot_video    │  火山引擎 JiMeng (并行)
+        │ figurine_to_anime   │  Replicate (depth + SDXL)
+        │ audio_portrait      │  火山引擎 OmniHuman 1.5
+        │ tts                 │  edge-tts (微软免费)
+        │ add_bgm             │  DeepSeek 意图分析 → Replicate stable-audio-open / edge-tts + ffmpeg
+        └─────────────────────┘
+
+api.py (FastAPI)
+    POST /feishu/event   ← 飞书消息 Webhook
+    POST /feishu/card    ← 卡片按钮回调
+    GET  /media/{file}   ← 本地文件服务（完整响应，避免 EOF）
+    POST /animate        ← REST API（可选）
 ```
 
 **核心依赖 / Core Dependencies:**
@@ -387,11 +443,13 @@ priority = 0.35 × freshness + 0.30 × freq_score + 0.35 × quality
 | 组件 | 用途 |
 |------|------|
 | FastAPI + uvicorn | Web 服务层 |
-| lark-oapi | 飞书 SDK |
-| volcengine | 即梦 AI 视频生成 |
-| openai (DeepSeek) | Planner + Prompt 增强 + 记忆蒸馏 |
+| lark-oapi | 飞书机器人 SDK |
+| volcengine | 即梦 AI 视频生成 + OmniHuman |
+| openai (DeepSeek) | Planner · Prompt 增强 · 记忆蒸馏 |
+| replicate | 手办 → 动漫转换流水线 |
 | edge-tts | 免费 TTS（微软神经网络语音）|
+| ffmpeg | 视频 + 音频合并（配音功能）|
 
 ---
 
-*Built with ❤️ using Volcengine JiMeng AI + DeepSeek + edge-tts*
+*Built with Volcengine JiMeng AI · DeepSeek · Replicate · edge-tts · ffmpeg*
