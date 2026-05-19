@@ -339,11 +339,14 @@ async def _show_welcome(open_id: str, chat_id: str) -> None:
     await _send_card(chat_id, _welcome_card(open_id))
 
 
-async def _on_image(open_id: str, chat_id: str, message_id: str, content: dict) -> None:
-    # New user: show welcome card first; they must pick a language before continuing.
+def _ensure_state(open_id: str) -> None:
+    """Init state with default language (zh) for users who skipped onboarding."""
     if open_id not in _user_state:
-        await _show_welcome(open_id, chat_id)
-        return
+        _set_state(open_id, _S_WAIT_IMAGE, lang="zh")
+
+
+async def _on_image(open_id: str, chat_id: str, message_id: str, content: dict) -> None:
+    _ensure_state(open_id)
 
     image_key = content.get("image_key", "")
     lang      = _lang(open_id)
@@ -398,10 +401,8 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
         await _show_welcome(open_id, chat_id)
         return
 
-    # ── Brand-new user who typed something other than hello ───────────
-    if open_id not in _user_state:
-        await _show_welcome(open_id, chat_id)
-        return
+    # ── Brand-new user: init with default lang (zh), don't block ────────
+    _ensure_state(open_id)
 
     state = _get_state(open_id)
     s     = state["state"]
