@@ -489,8 +489,8 @@ Return ONLY the JSON — no markdown, no explanation."""
             "width":    ctx.get("width", 1280),
             "height":   ctx.get("height", 720),
         }
-        if ctx.get("image_url") and idx == 0:
-            body["image_urls"] = [ctx["image_url"]]
+        if ctx.get("image_url"):
+            body["image_urls"] = [ctx["image_url"]]  # apply to ALL shots
         result = await _submit_and_poll(body, f"MultiShot[{idx+1}]")
         return _extract_video_url(result["data"])
 
