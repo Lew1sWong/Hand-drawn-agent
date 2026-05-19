@@ -82,6 +82,12 @@ _HELLO_WORDS = {
 _EXIT_WORDS  = {"exit", "quit", "退出", "重置", "reset", "/exit", "/reset", "/start"}
 _STOP_WORDS  = {"停止", "取消", "stop", "cancel", "停", "不要了", "算了"}
 
+# Post-production commands (matched after video delivery)
+_BGM_WORDS   = {"加配音", "加声音", "加音乐", "加旁白", "配音", "旁白",
+                "add audio", "add sound", "add music", "add narration", "narrate"}
+_REGEN_WORDS = {"重新生成", "重做", "再来一次", "再生成", "重试",
+                "regenerate", "redo", "retry", "again"}
+
 _user_state: dict[str, dict[str, Any]] = {}
 _running_tasks: dict[str, asyncio.Task] = {}   # open_id → active agent task
 
@@ -328,8 +334,12 @@ def _format_video_result(open_id: str, result) -> str:
 
 def _rating_prompt(open_id: str) -> str:
     return _t(open_id,
-        "⭐ 请给这个视频打分（回复 1–5）\n1=很差  3=还可以  5=非常满意",
-        "⭐ Please rate this video (reply 1–5)\n1=Poor  3=OK  5=Excellent",
+        "⭐ 请给这个视频打分（回复 1–5）\n"
+        "1=很差  3=还可以  5=非常满意\n\n"
+        "💡 也可以回复：加配音 · 重新生成 · 发新图/描述继续创作",
+        "⭐ Please rate this video (reply 1–5)\n"
+        "1=Poor  3=OK  5=Excellent\n\n"
+        "💡 Or reply: add audio · regenerate · send new image/description",
     )
 
 
@@ -445,8 +455,11 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
             ))
         return
 
-    # ── Rating reply ───────────────────────────────────────────────────
+    # ── Post-production & rating ───────────────────────────────────────
     if s == _S_WAIT_RATING:
+        lang = _lang(open_id)
+
+        # ① Numeric rating
         try:
             rating = int(text)
             if 1 <= rating <= 5:
@@ -458,7 +471,7 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
                     f"{stars} 谢谢反馈！({rating}/5) 我会记住你的喜好。",
                     f"{stars} Thanks for the rating! ({rating}/5) I'll remember your preferences.",
                 ))
-                _set_state(open_id, _S_WAIT_IMAGE, lang=_lang(open_id))
+                _set_state(open_id, _S_WAIT_IMAGE, lang=lang)
                 await _send(chat_id, _t(open_id,
                     "发送新描述或图片，继续创作！🎨",
                     "Send another description or image to continue! 🎨",
@@ -466,8 +479,74 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
                 return
         except ValueError:
             pass
-        # Non-numeric → skip rating, fall through to normal flow
-        _set_state(open_id, _S_WAIT_IMAGE, lang=_lang(open_id))
+
+        # ② Add audio to the existing video
+        if any(w in text for w in _BGM_WORDS):
+            video_url = state.get("last_video_url")
+            prompt    = state.get("last_prompt", "")
+            if not video_url:
+                await _send(chat_id, _t(open_id,
+                    "找不到上一个视频，请重新生成。",
+                    "No previous video found, please generate a new one.",
+                ))
+                return
+            await _send(chat_id, _t(open_id,
+                "🎵 正在添加配音，请稍候……",
+                "🎵 Adding narration, please wait…",
+            ))
+            try:
+                from tools import AddBGMTool
+                bgm_ctx = {"video_url": video_url, "user_description": prompt, "lang": lang}
+                bgm_out = await AddBGMTool().run(bgm_ctx)
+                new_url = bgm_out["video_url"]
+                await _send(chat_id, _t(open_id,
+                    f"🎬 配音完成！\n\n🔗 {new_url}",
+                    f"🎬 Narration added!\n\n🔗 {new_url}",
+                ))
+                _set_state(open_id, _S_WAIT_RATING,
+                           last_prompt=prompt, last_video_url=new_url,
+                           last_assets=state.get("last_assets", {}), lang=lang)
+                await _send(chat_id, _rating_prompt(open_id))
+            except Exception as exc:
+                logger.exception("AddBGM post-process error for %s", open_id)
+                await _send(chat_id, f"❌ {exc}")
+            return
+
+        # ③ Regenerate with same image + same prompt
+        if any(w in text for w in _REGEN_WORDS):
+            prompt    = state.get("last_prompt", "")
+            last_assets = state.get("last_assets", {})
+            if not prompt:
+                await _send(chat_id, _t(open_id,
+                    "找不到上一次的请求，请重新描述。",
+                    "No previous request found, please describe again.",
+                ))
+                return
+            _pop_state(open_id)
+            await _send(chat_id, _t(open_id,
+                "🔄 重新生成中……",
+                "🔄 Regenerating…",
+            ))
+            try:
+                result = await _run_agent_with_progress(
+                    open_id, chat_id, user_request=prompt, assets=last_assets
+                )
+                await _send(chat_id, _format_video_result(open_id, result))
+                _set_state(open_id, _S_WAIT_RATING,
+                           last_prompt=prompt, last_video_url=result.video_url,
+                           last_assets=last_assets, lang=lang)
+                await _send(chat_id, _rating_prompt(open_id))
+            except asyncio.CancelledError:
+                await _send(chat_id, _t(open_id, "⛔ 已取消。", "⛔ Cancelled."))
+                _set_state(open_id, _S_WAIT_IMAGE, lang=lang)
+            except Exception as exc:
+                logger.exception("Regen error for %s", open_id)
+                await _send(chat_id, f"❌ {exc}")
+                _set_state(open_id, _S_WAIT_IMAGE, lang=lang)
+            return
+
+        # ④ Any other text → skip rating, treat as new request
+        _set_state(open_id, _S_WAIT_IMAGE, lang=lang)
         s = _S_WAIT_IMAGE
 
     # ── Text-to-video (no image) ───────────────────────────────────────
@@ -487,7 +566,11 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
         try:
             result = await _run_agent_with_progress(open_id, chat_id, user_request=text, assets={})
             await _send(chat_id, _format_video_result(open_id, result))
-            _set_state(open_id, _S_WAIT_RATING, last_prompt=result.last_prompt or text, lang=lang)
+            _set_state(open_id, _S_WAIT_RATING,
+                       last_prompt=result.last_prompt or text,
+                       last_video_url=result.video_url,
+                       last_assets={},
+                       lang=lang)
             await _send(chat_id, _rating_prompt(open_id))
         except asyncio.CancelledError:
             await _send(chat_id, _t(open_id, "⛔ 生成已取消。", "⛔ Generation cancelled."))
@@ -527,7 +610,11 @@ async def _on_text(open_id: str, chat_id: str, text: str) -> None:
             )
         result = await _run_agent_with_progress(open_id, chat_id, user_request=text, assets=assets)
         await _send(chat_id, _format_video_result(open_id, result))
-        _set_state(open_id, _S_WAIT_RATING, last_prompt=result.last_prompt or text, lang=lang)
+        _set_state(open_id, _S_WAIT_RATING,
+                   last_prompt=result.last_prompt or text,
+                   last_video_url=result.video_url,
+                   last_assets=assets,
+                   lang=lang)
         await _send(chat_id, _rating_prompt(open_id))
 
     except asyncio.CancelledError:
