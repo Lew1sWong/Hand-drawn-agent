@@ -14,9 +14,14 @@ Async design:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import shelve
+import threading
+import time as _time
 import uuid
+from collections import defaultdict, deque
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -24,7 +29,7 @@ from typing import Optional
 import aiofiles
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 load_dotenv()  # load .env before any os.environ reads
@@ -49,7 +54,7 @@ app = FastAPI(
 
 
 # ---------------------------------------------------------------------------
-# In-memory job store  (replace with Redis + Celery for production)
+# Job store — shelve-backed for persistence across restarts
 # ---------------------------------------------------------------------------
 
 class JobStatus(str, Enum):
@@ -68,7 +73,54 @@ class Job(BaseModel):
     error:           Optional[str]   = None
 
 
-_jobs: dict[str, Job] = {}
+class _ShelveJobStore:
+    """Thread-safe shelve-backed job store. Survives process restarts."""
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._lock = threading.Lock()
+
+    def set(self, job: Job) -> None:
+        with self._lock, shelve.open(self._path, writeback=False) as db:
+            db[job.job_id] = job.model_dump()
+
+    def get(self, job_id: str) -> Job | None:
+        with self._lock, shelve.open(self._path, writeback=False) as db:
+            raw = db.get(job_id)
+        return Job(**raw) if raw else None
+
+    def counts(self) -> dict:
+        with self._lock, shelve.open(self._path, writeback=False) as db:
+            result = {s.value: 0 for s in JobStatus}
+            for raw in db.values():
+                result[raw.get("status", JobStatus.failed.value)] += 1
+        return result
+
+
+_job_store = _ShelveJobStore(os.environ.get("JOB_DB_PATH", "jobs.db"))
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting (sliding window, per-IP, no extra dependencies)
+# ---------------------------------------------------------------------------
+
+_RATE_WINDOW_S  = int(os.environ.get("RATE_WINDOW_S", "60"))
+_RATE_MAX_REQS  = int(os.environ.get("RATE_MAX_REQS", "5"))
+_ip_timestamps: defaultdict[str, deque] = defaultdict(deque)
+
+
+def _check_rate_limit(client_ip: str) -> None:
+    now = _time.monotonic()
+    dq  = _ip_timestamps[client_ip]
+    while dq and dq[0] < now - _RATE_WINDOW_S:
+        dq.popleft()
+    if len(dq) >= _RATE_MAX_REQS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded: max {_RATE_MAX_REQS} requests per {_RATE_WINDOW_S}s",
+            headers={"Retry-After": str(_RATE_WINDOW_S)},
+        )
+    dq.append(now)
 
 
 # ---------------------------------------------------------------------------
@@ -103,8 +155,12 @@ async def _run_job(
     user_request: str,
     assets: dict,
 ) -> None:
-    job = _jobs[job_id]
+    job = _job_store.get(job_id)
+    if job is None:
+        logger.error("_run_job: job %s not found in store", job_id)
+        return
     job.status = JobStatus.processing
+    _job_store.set(job)
 
     try:
         result: AgentResult = await run_agent(
@@ -115,21 +171,25 @@ async def _run_job(
         job.video_url       = result.video_url
         job.plan            = result.plan
         job.enhanced_prompt = result.enhanced_prompt
+        _job_store.set(job)
         logger.info("Job %s completed  video_url=%s", job_id, result.video_url)
 
     except TimeoutError as exc:
         job.status = JobStatus.failed
         job.error  = f"Timeout: {exc}"
+        _job_store.set(job)
         logger.error("Job %s timed out: %s", job_id, exc)
 
     except RuntimeError as exc:
         job.status = JobStatus.failed
         job.error  = str(exc)
+        _job_store.set(job)
         logger.error("Job %s failed: %s", job_id, exc)
 
     except Exception as exc:
         job.status = JobStatus.failed
         job.error  = f"Unexpected error: {exc}"
+        _job_store.set(job)
         logger.exception("Job %s unexpected error", job_id)
 
 
@@ -143,6 +203,18 @@ class SubmitResponse(BaseModel):
     message: str
 
 
+@app.on_event("startup")
+async def _start_rate_limit_cleanup() -> None:
+    async def _cleanup() -> None:
+        while True:
+            await asyncio.sleep(300)
+            cutoff = _time.monotonic() - _RATE_WINDOW_S
+            stale = [ip for ip, dq in _ip_timestamps.items() if not dq or dq[-1] < cutoff]
+            for ip in stale:
+                del _ip_timestamps[ip]
+    asyncio.create_task(_cleanup())
+
+
 @app.post(
     "/animate",
     status_code=202,
@@ -150,6 +222,7 @@ class SubmitResponse(BaseModel):
     summary="Submit an animation job",
 )
 async def submit_animation(
+    request: Request,
     background_tasks: BackgroundTasks,
     description: str                    = Form(...,  description="Natural-language animation description (any language)"),
     image: Optional[UploadFile]         = File(None, description="Hand-drawn sketch image (PNG/JPG)"),
@@ -166,16 +239,17 @@ async def submit_animation(
     Returns **202 Accepted** with a `job_id`.
     Poll `GET /animate/{job_id}` to track progress and retrieve the video URL.
     """
+    _check_rate_limit(request.client.host)
+
     if not description.strip():
         raise HTTPException(status_code=422, detail="description must not be empty")
 
-    # Resolve image
+    # Resolve image (optional — omit for text-only text_to_video requests)
+    resolved_image_url: Optional[str] = None
     if image_url:
         resolved_image_url = image_url
     elif image:
         resolved_image_url = await _store_upload(image, "image")
-    else:
-        raise HTTPException(status_code=422, detail="Provide either 'image' file or 'image_url'")
 
     # Resolve audio (optional)
     resolved_audio_url: Optional[str] = None
@@ -185,13 +259,15 @@ async def submit_animation(
         resolved_audio_url = await _store_upload(audio, "audio")
 
     # Build assets dict — the planner sees which keys are present and plans accordingly
-    assets: dict = {"image_url": resolved_image_url}
+    assets: dict = {}
+    if resolved_image_url:
+        assets["image_url"] = resolved_image_url
     if resolved_audio_url:
         assets["audio_url"] = resolved_audio_url
 
     # Create job record
     job_id = uuid.uuid4().hex
-    _jobs[job_id] = Job(job_id=job_id)
+    _job_store.set(Job(job_id=job_id))
 
     background_tasks.add_task(_run_job, job_id, description, assets)
     logger.info("Job %s queued  description='%s'  assets=%s", job_id, description, list(assets))
@@ -225,7 +301,7 @@ async def get_animation_status(job_id: str):
     - **completed** — `video_url` is populated, `plan` shows what tools ran
     - **failed** — `error` describes what went wrong
     """
-    job = _jobs.get(job_id)
+    job = _job_store.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
@@ -261,15 +337,48 @@ async def serve_media(filename: str) -> Response:
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Length": str(len(content)), "Cache-Control": "public, max-age=3600"},
+        headers={"Content-Length": str(len(content)), "Cache-Control": "public, max-age=3600", "bypass-tunnel-reminder": "true"},
     )
+
+
+_PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
+_ALLOWED_VIDEO_PREFIXES = (
+    "https://tos-cn-",           # Volcengine TOS CDN
+    "https://p3-",               # Volcengine media CDN
+    "https://lf3-",              # alternative Volcengine CDN
+    f"{_PUBLIC_BASE_URL}/media/",# self-hosted /media/ files
+)
+
+
+@app.get("/view", include_in_schema=False, response_class=HTMLResponse)
+async def view_video(url: str):
+    """Serve a full-screen HTML video player for allowlisted video URLs."""
+    if not any(url.startswith(p) for p in _ALLOWED_VIDEO_PREFIXES):
+        raise HTTPException(status_code=400, detail="URL origin not allowed")
+    from urllib.parse import quote
+    safe_url = quote(url, safe=":/?=&%")
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video</title>
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{ background: #000; width: 100vw; height: 100vh; overflow: hidden; display: flex; align-items: center; justify-content: center; }}
+video {{ width: 100vw; height: 100vh; object-fit: contain; display: block; }}
+</style>
+</head>
+<body>
+<video src="{safe_url}" controls autoplay playsinline></video>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
 
 
 @app.get("/health")
 async def health():
-    counts = {s.value: 0 for s in JobStatus}
-    for j in _jobs.values():
-        counts[j.status.value] += 1
+    counts = _job_store.counts()
     return {"status": "ok", **counts}
 
 
@@ -287,13 +396,16 @@ async def feishu_event(request: Request):
 async def feishu_card(request: Request):
     """
     Feishu card-action callback — called when users click buttons on interactive cards.
-    Register this URL in Feishu console → App Features → Bot → Card Callback URL.
+    Register this URL in Feishu console → App Features → Bot → Card Callback URL
+    (SEPARATE from the Event Subscription Request URL).
+
+    Supports v1 and v2 (schema: "2.0") Feishu card callback payloads.
     """
     try:
         body = await request.json()
     except Exception:
         body = {}
-    logger.info("Feishu card callback body: %s", body)
+    logger.info("Feishu card callback  schema=%s  keys=%s", body.get("schema","v1"), list(body.keys()))
     try:
         result = await _feishu_card(body)
     except Exception as exc:

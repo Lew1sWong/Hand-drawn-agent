@@ -22,7 +22,7 @@ from typing import Any, Optional
 from openai import AsyncOpenAI
 
 from executor import execute_plan
-from memory import UserMemory
+from memory import UserMemory, memory_path_for
 from planner import Plan, make_plan
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ class AgentResult:
 async def run_agent(
     user_request: str,
     assets: dict[str, Any],
-    memory_path: Path | str = "user_memory.json",
+    memory_path: Path | str | None = None,
 ) -> AgentResult:
     """
     Run the full agent pipeline.
@@ -70,15 +70,22 @@ async def run_agent(
         AgentResult — check `.error` first; `.video_url` populated on success.
     """
     # 1. Memory
+    if memory_path is None:
+        memory_path = memory_path_for("default")
     memory = UserMemory(memory_path).load()
 
     # 2. Plan
-    available_assets: set[str] = set(assets.keys())
+    # audio_mode_hint is set by the conversation layer (not a real asset key).
+    # Extract its value before building available_assets so the planner isn't
+    # confused by a key it doesn't recognise as a tool input.
+    audio_mode_hint: str | None = assets.get("audio_mode_hint")
+    available_assets: set[str] = set(assets.keys()) - {"audio_mode_hint"}
     plan: Plan = await make_plan(
         user_request=user_request,
         memory=memory,
         available_assets=available_assets,
         deepseek_api_key=DEEPSEEK_API_KEY,
+        audio_mode_hint=audio_mode_hint,
     )
     plan_summary = [
         {"tool": s.tool, "inputs": s.inputs, "reason": s.reason}
@@ -97,10 +104,6 @@ async def run_agent(
     initial_ctx: dict[str, Any] = {"user_description": user_request, **assets}
     final_ctx = await execute_plan(plan, initial_ctx, DEEPSEEK_API_KEY)
 
-    # 4. Persist memory
-    ep = final_ctx.get("enhanced_prompt") or user_request
-    memory.record_success(ep)
-
     video_url = final_ctx.get("video_url")
     if not video_url:
         tools_run = " → ".join(s["tool"] for s in plan_summary)
@@ -109,9 +112,18 @@ async def run_agent(
             f"Context keys: {list(final_ctx.keys())}"
         )
 
+    # 4. Persist memory (non-blocking async write) — only on actual success
+    ep = final_ctx.get("enhanced_prompt") or user_request
+    memory.record_success(ep)
+    await memory.save_async()
+
     # 5. Maybe distill memory (background, non-blocking)
     import asyncio as _asyncio
-    _asyncio.create_task(_maybe_distill(memory))
+    _distill_task = _asyncio.create_task(_maybe_distill(memory))
+    _distill_task.add_done_callback(
+        lambda t: logger.warning("Distillation failed: %s", t.exception(), exc_info=t.exception())
+        if not t.cancelled() and t.exception() else None
+    )
 
     # Parse multi-shot URLs if present
     video_urls: list[str] = []
@@ -168,6 +180,7 @@ async def _maybe_distill(memory: UserMemory) -> None:
                     ],
                 )
                 memory.update_distilled(resp.choices[0].message.content.strip())
+                memory._last_distill_good_count = len([e for e in memory.working if e.quality >= 0.6])
                 logger.info("L1 distillation complete")
             except Exception:
                 logger.warning("L1 distillation failed", exc_info=True)

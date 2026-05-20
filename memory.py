@@ -23,13 +23,22 @@ Rating → quality mapping:
 
 from __future__ import annotations
 
+import heapq
 import json
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+
+def memory_path_for(user_id: str) -> Path:
+    """Return the memory file path for a user, creating the directory if needed."""
+    d = Path(os.environ.get("MEMORY_DIR", "./memories"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"user_memory_{user_id}.json"
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +135,9 @@ class UserMemory:
         # In-memory only — reference to the last added entry for rating updates
         self._last_entry: Optional[MemoryEntry] = None
 
+        # In-memory only — tracks good-entry count at last distillation to avoid redundant LLM calls
+        self._last_distill_good_count: int = 0
+
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
@@ -163,7 +175,7 @@ class UserMemory:
             logger.warning("Could not load memory from %s — starting fresh", self._path, exc_info=True)
         return self
 
-    def save(self) -> None:
+    def _save_sync(self) -> None:
         data = {
             "distilled_style":      self.distilled_style,
             "preferred_resolution": self.preferred_resolution,
@@ -174,6 +186,16 @@ class UserMemory:
             "archive":              [e.to_dict() for e in self.archive],
         }
         self._path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def save(self) -> None:
+        """Synchronous save — safe to call from sync contexts (feishu_bot, ratings)."""
+        self._save_sync()
+
+    async def save_async(self) -> None:
+        """Non-blocking save for async contexts (agent, executor) — offloads I/O to thread pool."""
+        import asyncio as _asyncio
+        loop = _asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._save_sync)
 
     # ------------------------------------------------------------------
     # L2 management
@@ -197,6 +219,7 @@ class UserMemory:
         if len(self.working) >= L2_MAX:
             self._evict_one()
 
+        self.evict_bad_memories()
         entry = MemoryEntry.from_prompt(content, quality=quality)
         self.working.append(entry)
         self._last_entry = entry
@@ -275,20 +298,53 @@ class UserMemory:
     # ------------------------------------------------------------------
 
     def should_distill_working(self) -> bool:
-        """True when enough high-quality entries exist to re-distill L1."""
+        """True when enough new high-quality entries exist to re-distill L1."""
         good = [e for e in self.working if e.quality >= 0.6]
-        return len(good) >= 5 and len(good) % 5 == 0
+        n = len(good)
+        if n < 5 or n <= self._last_distill_good_count:
+            return False
+        return n % 5 == 0
 
     def should_distill_archive(self) -> bool:
         """True when L3 archive is large enough to compress."""
         return len(self.archive) >= L3_DISTILL_AT
 
-    def top_working(self, n: int = 5) -> list[MemoryEntry]:
-        """Return top-N L2 entries by priority (for context injection)."""
+    def evict_bad_memories(self) -> int:
+        """Remove entries that were rated poorly and never revisited."""
+        before = len(self.working)
+        self.working = [
+            e for e in self.working
+            if not (e.quality < 0.2 and e.access_count <= 1 and not e.pinned)
+        ]
+        removed = before - len(self.working)
+        if removed:
+            self.save()
+            logger.info("Evicted %d bad-quality memories from L2", removed)
+        return removed
+
+    def top_working(self, n: int = 5, query: str = "") -> list[MemoryEntry]:
+        """Return top-N L2 entries by priority, boosted by keyword overlap with query."""
         now = time.time()
-        for e in self.working:
-            pass  # touch is NOT called here — reading doesn't change priority
-        return sorted(self.working, key=lambda e: e.priority(now), reverse=True)[:n]
+
+        if query:
+            # Simple bigram tokenisation — works for both Chinese and English without jieba
+            def _tokens(text: str) -> set[str]:
+                t = text.lower()
+                unigrams = set(t.split())
+                bigrams  = {t[i:i+2] for i in range(len(t) - 1) if t[i:i+2].strip()}
+                return unigrams | bigrams
+
+            query_tok = _tokens(query)
+
+            def _score(e: MemoryEntry) -> tuple:
+                overlap   = len(query_tok & _tokens(e.content))
+                has_match = overlap > 0
+                return (has_match, e.priority(now))
+        else:
+            def _score(e: MemoryEntry) -> tuple:
+                return (True, e.priority(now))
+
+        return heapq.nlargest(n, self.working, key=_score)
 
     def promote_from_archive(self, entries: list[MemoryEntry]) -> None:
         """Move distilled entries back to L2, clearing archive."""
@@ -303,7 +359,7 @@ class UserMemory:
     # Planner context string (L1 + top L2)
     # ------------------------------------------------------------------
 
-    def as_context_str(self) -> str:
+    def as_context_str(self, query: str = "") -> str:
         lines = ["[User Memory]"]
 
         if self.distilled_style:
@@ -318,11 +374,10 @@ class UserMemory:
         if self.conversation_count:
             lines.append(f"- Total generations: {self.conversation_count}")
 
-        top = self.top_working(5)
+        top = self.top_working(5, query=query)
         if top:
-            lines.append("- Top working memories (sorted by priority):")
+            lines.append("- Relevant past memories (by priority + keyword match):")
             for e in top:
-                stars = f"q={e.quality:.1f}"
-                lines.append(f"    [{stars}] {e.content[:120]}")
+                lines.append(f"    [q={e.quality:.1f}] {e.content[:120]}")
 
         return "\n".join(lines)

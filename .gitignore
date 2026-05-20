@@ -1,9 +1,15 @@
 .env
 .env.local
 user_memory.json
+user_memory_*.json
+memories/
 venv/
 .venv/
 node_modules/
 __pycache__/
 .DS_Store
 .claude/
+jobs.db
+jobs.db-shm
+jobs.db-wal
+server.log

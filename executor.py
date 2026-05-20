@@ -18,12 +18,14 @@ Prompt enhancement is performed lazily — only for tools that require an
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from planner import Plan
 from tools import TOOL_MAP
+from tools.base import ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +45,9 @@ Rules:
 3. Add cinematic lighting: "golden-hour rim light", "soft dappled light through leaves",
    "dramatic side-lighting", "misty volumetric fog", "moonlit silhouette",
    "warm lantern glow", "cool blue-tinted dawn"
-4. Describe only visible motion, light, and atmosphere — no story, no dialogue.
+4. Describe visible motion, light, and atmosphere. If a character or person is present
+   (人物 / 角色 / person / character / figure / rider), include them with a clear visual
+   description of their appearance and posture. Omit backstory and dialogue text.
 5. Use present tense and concrete visual language.
 6. Always end with: "consistent line-art aesthetic, fluid animation."
 Return only the prompt text — nothing else."""
@@ -60,6 +64,12 @@ async def _enhance_prompt(user_description: str, api_key: str) -> str:
         ],
     )
     return resp.choices[0].message.content.strip()
+
+
+def _extract_quoted_text(text: str) -> str | None:
+    """Return the first quoted string found in text (Chinese or ASCII quotes)."""
+    m = re.search(r'["“”「」](.*?)["“”「」]', text)
+    return m.group(1).strip() if m else None
 
 
 async def execute_plan(
@@ -86,6 +96,14 @@ async def execute_plan(
     """
     ctx: dict[str, Any] = dict(initial_ctx)
     total = len(plan)
+
+    # Extract verbatim quoted text from user description so TTS uses the
+    # user's exact words instead of an LLM-rewritten narration.
+    if "tts_text" not in ctx:
+        quoted = _extract_quoted_text(ctx.get("user_description", ""))
+        if quoted:
+            ctx["tts_text"] = quoted
+            logger.info("Extracted quoted tts_text: %s", quoted)
 
     for i, step in enumerate(plan, 1):
         tool = TOOL_MAP.get(step.tool)
@@ -123,6 +141,13 @@ async def execute_plan(
             ctx.update(output)
             logger.info("Fallback text_to_video done — keys: %s", list(output))
             break  # remaining steps (e.g. image_to_video after figurine_to_anime) are skipped
+
+        try:
+            tool.check_ctx(ctx)
+        except ToolError as exc:
+            raise ValueError(
+                f"Step {i}/{total}: pre-flight failed for '{step.tool}': {exc}"
+            ) from exc
 
         logger.info(
             "Step %d/%d: running '%s'  reason='%s'",
