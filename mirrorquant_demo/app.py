@@ -1,3 +1,4 @@
+# Backend: server
 from __future__ import annotations
 
 from mirrorquant_demo.mirror_search import load_prices, find_mirrors 
@@ -41,10 +42,13 @@ async def static_files(asset_path: str):
     return FileResponse(asset)
 
 
-@app.get("/health")
+@app.get("/health") # Simple health check endpoint to verify the server is running
 async def health():
     return {"status": "ok", "app": "mirrorquant-demo"}
 
+@app.get("/api/heroes") # Endpoint to list available hero stocks and their associated metadata (ticker, name, hero window dates)
+async def list_heroes():
+    return {"heroes": _load_json("heroes.json")}
 
 @app.get("/api/mirrors")
 async def get_mirrors(
@@ -79,14 +83,19 @@ async def get_mirrors(
 
     matches = []
     for row in results.head(5).itertuples(index=False):
+        match_start = row.start_date.strftime("%Y-%m-%d")
+        match_end = row.end_date.strftime("%Y-%m-%d")
         matches.append(
             {
                 "ticker": row.ticker,
                 "name": row.ticker,
                 "score": float(row.similarity),
-                "regime_label": "Price DNA match",
+                "regime_label": f"Price DNA match ({match_start} to {match_end})",
                 "sector": "Unknown",
-                "explanation": f"{row.ticker} shows similar price and volume behavior to {normalized} during the selected hero window.",
+                "explanation": (
+                    f"{row.ticker} matched the {match_start} to {match_end} window, "
+                    f"which most closely resembles {normalized}'s selected breakout behavior."
+                ),
             }
         )
 

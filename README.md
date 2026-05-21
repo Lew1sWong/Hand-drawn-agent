@@ -519,4 +519,4 @@ Add your preferred license here.
 
 
 ## To start 
-python -m uvicorn mirrorquant.app:app --reload
+python -m uvicorn mirrorquant_demo.app:app --reload
