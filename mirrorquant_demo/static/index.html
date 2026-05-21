@@ -23,11 +23,11 @@
       </section>
 
       <section class="panel controls">
-        <div>
+        <div class="control-field">
           <label for="hero-select">Hero stock</label>
           <select id="hero-select"></select>
         </div>
-        <div>
+        <div class="control-field">
           <label for="mode-select">DNA mode</label>
           <select id="mode-select">
             <option value="price_dna">Price DNA</option>
@@ -38,24 +38,63 @@
         <button id="find-button" type="button">Find Mirrors</button>
       </section>
 
+      <section class="summary-band" aria-label="Active search summary">
+        <article class="summary-tile">
+          <span class="tile-label">Active Mode</span>
+          <strong id="active-mode">Loading...</strong>
+        </article>
+        <article class="summary-tile">
+          <span class="tile-label">Search Engine</span>
+          <strong id="search-backend">Loading...</strong>
+        </article>
+        <article class="summary-tile">
+          <span class="tile-label">Hero Regime</span>
+          <strong id="hero-regime">Loading...</strong>
+        </article>
+        <article class="summary-tile">
+          <span class="tile-label">Encoded Window</span>
+          <strong id="effective-window">Loading...</strong>
+        </article>
+      </section>
+
       <section class="grid">
         <article class="panel">
-          <h2>Hero Window</h2>
+          <div class="panel-header">
+            <div>
+              <h2>Hero Window</h2>
+              <p class="panel-kicker">The reference breakout profile we are trying to mirror.</p>
+            </div>
+          </div>
           <div id="hero-card" class="stack"></div>
         </article>
         <article class="panel">
-          <h2>Market Watch</h2>
+          <div class="panel-header">
+            <div>
+              <h2>Market Watch</h2>
+              <p class="panel-kicker">Macro weather and risk tone around the current regime.</p>
+            </div>
+          </div>
           <div id="market-watch" class="stack"></div>
         </article>
       </section>
 
       <section class="grid">
         <article class="panel">
-          <h2>Mirror Matches</h2>
+          <div class="panel-header">
+            <div>
+              <h2>Mirror Matches</h2>
+              <p class="panel-kicker">Top latent analogs ranked by hidden behavioral similarity.</p>
+            </div>
+          </div>
           <div id="matches" class="stack"></div>
         </article>
         <article class="panel">
-          <h2>Industry Chain</h2>
+          <div class="panel-header">
+            <div>
+              <h2>Industry Chain</h2>
+              <p class="panel-kicker">Why a quant match may still make sense in real-world market structure.</p>
+            </div>
+          </div>
           <div id="industry-chain" class="stack"></div>
         </article>
       </section>

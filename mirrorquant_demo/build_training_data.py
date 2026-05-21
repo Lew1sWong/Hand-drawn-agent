@@ -17,7 +17,8 @@ def load_prices(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, parse_dates=["date"])
     return df.sort_values(["ticker", "date"]).copy()
 
-
+# pct_change: Pandas method to compute percentage change between the current and a prior element. It is often used to calculate returns in financial data.
+# fillna: Pandas method to fill NA/NaN values using the specified method. In this case, it fills NaN values with 0.0.
 def make_sequence_features(window_df: pd.DataFrame) -> np.ndarray:
     window_df = window_df.sort_values("date").copy()
 
@@ -28,7 +29,7 @@ def make_sequence_features(window_df: pd.DataFrame) -> np.ndarray:
         .replace([np.inf, -np.inf], 0.0)
         .fillna(0.0)
     )
-    window_df["price_rel"] = (window_df["close"] / window_df["close"].iloc[0]) - 1.0
+    window_df["price_rel"] = (window_df["close"] / window_df["close"].iloc[0]) - 1.0 
 
     features = window_df[["daily_return", "volume_change", "price_rel"]].to_numpy(dtype=np.float32)
     return features

@@ -1,7 +1,7 @@
 # Backend: server
 from __future__ import annotations
 
-from mirrorquant_demo.mirror_search import load_prices, find_mirrors 
+from mirrorquant_demo.vqvae_search import find_vqvae_mirrors
 
 import json
 from pathlib import Path
@@ -57,26 +57,30 @@ async def get_mirrors(
 ):
     normalized = ticker.upper()
 
-    if mode != "price_dna":
-        raise HTTPException(
-            status_code=400,
-            detail="Only price_dna is supported in the first real MVP"
-        )
-
     heroes = _load_json("heroes.json")
     hero = next((item for item in heroes if item["ticker"] == normalized), None)
     if hero is None:
         raise HTTPException(status_code=404, detail=f"No hero data for {normalized}")
 
-    df = load_prices(str(DATA_DIR / "prices.csv"))
+    if mode != "price_dna":
+        matches = _load_json("mirror_matches.json")
+        if normalized not in matches:
+            raise HTTPException(status_code=404, detail=f"No mirror data for {normalized}")
+        return {
+            "ticker": normalized,
+            "mode": mode,
+            "hero": hero,
+            "hero_regime_code": hero[mode]["regime_code"],
+            "matches": matches[normalized][mode],
+            "search_backend": "mock",
+        }
 
     try:
-        results = find_mirrors(
-            df=df,
+        results, hero_code, effective_window = find_vqvae_mirrors(
             hero_ticker=normalized,
             start=hero["start_date"],
             end=hero["end_date"],
-            window_size=40,
+            top_k=5,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -90,11 +94,12 @@ async def get_mirrors(
                 "ticker": row.ticker,
                 "name": row.ticker,
                 "score": float(row.similarity),
-                "regime_label": f"Price DNA match ({match_start} to {match_end})",
+                "regime_label": f"VQ-VAE Price DNA match ({match_start} to {match_end})",
                 "sector": "Unknown",
                 "explanation": (
-                    f"{row.ticker} matched the {match_start} to {match_end} window, "
-                    f"which most closely resembles {normalized}'s selected breakout behavior."
+                    f"{row.ticker} matched a learned latent regime similar to "
+                    f"{normalized}'s encoded hero window. "
+                    f"Matched window: {match_start} to {match_end}."
                 ),
             }
         )
@@ -103,7 +108,14 @@ async def get_mirrors(
         "ticker": normalized,
         "mode": mode,
         "hero": hero,
+        "hero_regime_code": hero_code,
         "matches": matches,
+        "effective_hero_window": {
+            "start_date": effective_window["start_date"].strftime("%Y-%m-%d"),
+            "end_date": effective_window["end_date"].strftime("%Y-%m-%d"),
+            "window_size": effective_window["window_size"],
+        },
+        "search_backend": "vqvae",
     }
 
 
