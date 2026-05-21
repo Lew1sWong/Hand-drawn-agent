@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MirrorQuant Demo</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">AI-first fintech demo</p>
+          <h1>MirrorQuant</h1>
+          <p class="lede">
+            Discover stocks with the same hidden behavioral DNA as a breakout leader.
+          </p>
+        </div>
+        <div class="hero-badge">
+          <span>Regime</span>
+          <strong id="headline-regime">Loading...</strong>
+        </div>
+      </section>
+
+      <section class="panel controls">
+        <div>
+          <label for="hero-select">Hero stock</label>
+          <select id="hero-select"></select>
+        </div>
+        <div>
+          <label for="mode-select">DNA mode</label>
+          <select id="mode-select">
+            <option value="price_dna">Price DNA</option>
+            <option value="economic_dna">Economic DNA</option>
+            <option value="social_dna">Social DNA</option>
+          </select>
+        </div>
+        <button id="find-button" type="button">Find Mirrors</button>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Hero Window</h2>
+          <div id="hero-card" class="stack"></div>
+        </article>
+        <article class="panel">
+          <h2>Market Watch</h2>
+          <div id="market-watch" class="stack"></div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Mirror Matches</h2>
+          <div id="matches" class="stack"></div>
+        </article>
+        <article class="panel">
+          <h2>Industry Chain</h2>
+          <div id="industry-chain" class="stack"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+  </html>

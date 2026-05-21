@@ -1,0 +1,107 @@
+[
+  {
+    "ticker": "MSFT",
+    "name": "Microsoft",
+    "window_label": "AI platform breakout",
+    "start_date": "2023-01-03",
+    "end_date": "2023-04-03",
+    "summary": "A clean momentum breakout driven by AI narrative acceleration, institutional accumulation, and lower realized volatility than headline sentiment implied.",
+    "price_dna": {
+      "regime_code": "ACCELERATION_07",
+      "confidence": 0.93,
+      "traits": [
+        "Volatility compression before breakout",
+        "Persistent relative strength",
+        "Rising volume on continuation days"
+      ]
+    },
+    "economic_dna": {
+      "regime_code": "SOFT_LANDING_03",
+      "confidence": 0.81,
+      "traits": [
+        "Cooling inflation",
+        "Falling rate shock risk",
+        "Supportive large-cap liquidity"
+      ]
+    },
+    "social_dna": {
+      "regime_code": "NARRATIVE_EXPANSION_05",
+      "confidence": 0.88,
+      "traits": [
+        "Positive AI narrative drift",
+        "High analyst attention",
+        "Low controversy relative to buzz"
+      ]
+    }
+  },
+  {
+    "ticker": "NVDA",
+    "name": "NVIDIA",
+    "window_label": "Demand shock expansion",
+    "start_date": "2023-05-01",
+    "end_date": "2023-07-31",
+    "summary": "A demand shock regime characterized by explosive earnings revision momentum, supply-chain attention, and aggressive trend persistence.",
+    "price_dna": {
+      "regime_code": "EXPANSION_11",
+      "confidence": 0.95,
+      "traits": [
+        "Gap continuation behavior",
+        "Extreme relative strength",
+        "Leadership persistence"
+      ]
+    },
+    "economic_dna": {
+      "regime_code": "CAPEX_SURGE_02",
+      "confidence": 0.79,
+      "traits": [
+        "Growth leadership favored",
+        "Long-duration sensitivity stabilizing",
+        "Enterprise spending optimism"
+      ]
+    },
+    "social_dna": {
+      "regime_code": "THEME_DOMINANCE_08",
+      "confidence": 0.94,
+      "traits": [
+        "Narrative saturation",
+        "High media concentration",
+        "Positive sentiment persistence"
+      ]
+    }
+  },
+  {
+    "ticker": "LLY",
+    "name": "Eli Lilly",
+    "window_label": "Defensive growth repricing",
+    "start_date": "2023-08-01",
+    "end_date": "2023-11-30",
+    "summary": "A low-drama breakout regime where earnings durability and category leadership attracted capital in a mixed macro backdrop.",
+    "price_dna": {
+      "regime_code": "QUALITY_TREND_04",
+      "confidence": 0.89,
+      "traits": [
+        "Orderly uptrend",
+        "Low drawdown profile",
+        "Consistent institutional sponsorship"
+      ]
+    },
+    "economic_dna": {
+      "regime_code": "DEFENSIVE_GROWTH_06",
+      "confidence": 0.84,
+      "traits": [
+        "Growth scarcity premium",
+        "Stable healthcare demand",
+        "Moderate volatility backdrop"
+      ]
+    },
+    "social_dna": {
+      "regime_code": "CREDIBLE_CATALYST_03",
+      "confidence": 0.76,
+      "traits": [
+        "Positive product news",
+        "Measured sentiment",
+        "Fundamental narrative consistency"
+      ]
+    }
+  }
+]

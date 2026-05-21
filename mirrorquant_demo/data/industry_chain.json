@@ -1,0 +1,62 @@
+{
+  "MSFT": [
+    {
+      "ticker": "NVDA",
+      "relationship": "Compute supplier",
+      "direction": "Upstream",
+      "impact": "AI infrastructure demand helps validate platform-level revenue expectations."
+    },
+    {
+      "ticker": "ORCL",
+      "relationship": "Enterprise cloud adjacency",
+      "direction": "Lateral",
+      "impact": "Shared enterprise spending trends can create similar latent accumulation signals."
+    },
+    {
+      "ticker": "SMCI",
+      "relationship": "Server infrastructure link",
+      "direction": "Upstream",
+      "impact": "Hardware deployment intensity can propagate into software adoption narratives."
+    }
+  ],
+  "NVDA": [
+    {
+      "ticker": "TSM",
+      "relationship": "Foundry partner",
+      "direction": "Upstream",
+      "impact": "Capacity and advanced packaging constraints shape downstream signal propagation."
+    },
+    {
+      "ticker": "SMCI",
+      "relationship": "Server integrator",
+      "direction": "Downstream",
+      "impact": "Demand shocks often appear in downstream infrastructure names after the chipset leader moves."
+    },
+    {
+      "ticker": "ANET",
+      "relationship": "Networking complement",
+      "direction": "Lateral",
+      "impact": "AI cluster buildouts can synchronize networking and compute leadership."
+    }
+  ],
+  "LLY": [
+    {
+      "ticker": "NVO",
+      "relationship": "Therapeutic category peer",
+      "direction": "Lateral",
+      "impact": "Category-level adoption and pricing expectations can produce mirrored quality trends."
+    },
+    {
+      "ticker": "ISRG",
+      "relationship": "Innovation credibility analog",
+      "direction": "Lateral",
+      "impact": "Different industries, but both benefit from durable premium narratives in healthcare."
+    },
+    {
+      "ticker": "UNH",
+      "relationship": "Healthcare demand exposure",
+      "direction": "Downstream",
+      "impact": "Healthcare capital flows can reinforce related defensive-growth latent signals."
+    }
+  ]
+}

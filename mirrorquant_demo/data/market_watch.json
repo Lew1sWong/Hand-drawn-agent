@@ -1,0 +1,44 @@
+{
+  "as_of": "2026-05-19",
+  "headline_regime": "Risk-on with selective breadth",
+  "indicators": [
+    {
+      "name": "VIX",
+      "value": "14.8",
+      "status": "Calm",
+      "insight": "Volatility remains contained, which supports continuation setups."
+    },
+    {
+      "name": "US 10Y Yield",
+      "value": "4.12%",
+      "status": "Stable",
+      "insight": "Rates are elevated but not disorderly, reducing shock risk for quality growth."
+    },
+    {
+      "name": "Inflation Trend",
+      "value": "Cooling",
+      "status": "Supportive",
+      "insight": "Disinflation favors multiple expansion for durable growth names."
+    },
+    {
+      "name": "Breadth",
+      "value": "Selective",
+      "status": "Mixed",
+      "insight": "Leadership is concentrated, so mirror signals are stronger in quality names than in broad cyclicals."
+    }
+  ],
+  "regime_transitions": [
+    {
+      "from": "Macro uncertainty",
+      "to": "Selective risk-on",
+      "date": "2026-05-12",
+      "note": "Large-cap leadership regained control after softer inflation expectations."
+    },
+    {
+      "from": "Theme rotation",
+      "to": "AI leadership consolidation",
+      "date": "2026-05-16",
+      "note": "Narrative concentration returned to infrastructure and platform winners."
+    }
+  ]
+}

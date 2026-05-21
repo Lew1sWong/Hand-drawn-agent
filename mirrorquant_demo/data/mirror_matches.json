@@ -1,0 +1,242 @@
+{
+  "MSFT": {
+    "price_dna": [
+      {
+        "ticker": "ORCL",
+        "name": "Oracle",
+        "score": 0.93,
+        "regime_label": "Accumulation to acceleration",
+        "sector": "Software",
+        "explanation": "Similar volatility compression, improving relative strength, and continued institutional follow-through."
+      },
+      {
+        "ticker": "PANW",
+        "name": "Palo Alto Networks",
+        "score": 0.89,
+        "regime_label": "Trend continuation",
+        "sector": "Cybersecurity",
+        "explanation": "Strong price persistence with limited pullback depth and healthy volume expansion."
+      },
+      {
+        "ticker": "UBER",
+        "name": "Uber",
+        "score": 0.85,
+        "regime_label": "Narrative-backed breakout",
+        "sector": "Mobility",
+        "explanation": "Not a sector analog, but the breakout structure and participation profile are similar."
+      }
+    ],
+    "economic_dna": [
+      {
+        "ticker": "AMZN",
+        "name": "Amazon",
+        "score": 0.91,
+        "regime_label": "Large-cap growth re-rating",
+        "sector": "Internet",
+        "explanation": "Match is driven more by macro easing and liquidity conditions than by chart structure alone."
+      },
+      {
+        "ticker": "CRM",
+        "name": "Salesforce",
+        "score": 0.87,
+        "regime_label": "Soft-landing beneficiary",
+        "sector": "Software",
+        "explanation": "Similar response to improving growth expectations and reduced rate sensitivity."
+      },
+      {
+        "ticker": "ADBE",
+        "name": "Adobe",
+        "score": 0.83,
+        "regime_label": "Quality growth regime",
+        "sector": "Software",
+        "explanation": "Shared macro fit with strong large-cap growth leadership under stable volatility."
+      }
+    ],
+    "social_dna": [
+      {
+        "ticker": "SMCI",
+        "name": "Super Micro Computer",
+        "score": 0.9,
+        "regime_label": "AI narrative spillover",
+        "sector": "Hardware",
+        "explanation": "Similarity is driven by positive AI narrative drift and unusually persistent attention."
+      },
+      {
+        "ticker": "AMD",
+        "name": "AMD",
+        "score": 0.86,
+        "regime_label": "Theme-linked momentum",
+        "sector": "Semiconductors",
+        "explanation": "FinBERT-style sentiment profile tracks the same optimism cluster around AI infrastructure."
+      },
+      {
+        "ticker": "SNOW",
+        "name": "Snowflake",
+        "score": 0.8,
+        "regime_label": "Narrative-sensitive growth",
+        "sector": "Cloud",
+        "explanation": "Shared attention regime, although weaker price confirmation than the hero stock."
+      }
+    ]
+  },
+  "NVDA": {
+    "price_dna": [
+      {
+        "ticker": "AVGO",
+        "name": "Broadcom",
+        "score": 0.94,
+        "regime_label": "Demand shock continuation",
+        "sector": "Semiconductors",
+        "explanation": "Explosive momentum with strong persistence after catalyst confirmation."
+      },
+      {
+        "ticker": "ARM",
+        "name": "Arm Holdings",
+        "score": 0.88,
+        "regime_label": "Leadership acceleration",
+        "sector": "Semiconductors",
+        "explanation": "Behavioral match comes from trend persistence and risk-on participation."
+      },
+      {
+        "ticker": "ANET",
+        "name": "Arista Networks",
+        "score": 0.84,
+        "regime_label": "Infrastructure breakout",
+        "sector": "Networking",
+        "explanation": "A lower-volatility cousin of the same expansion pattern."
+      }
+    ],
+    "economic_dna": [
+      {
+        "ticker": "MSFT",
+        "name": "Microsoft",
+        "score": 0.89,
+        "regime_label": "Capex cycle beneficiary",
+        "sector": "Software",
+        "explanation": "Macro context aligns around enterprise spending optimism and AI investment."
+      },
+      {
+        "ticker": "AMAT",
+        "name": "Applied Materials",
+        "score": 0.85,
+        "regime_label": "Capex expansion",
+        "sector": "Semicap Equipment",
+        "explanation": "Shared fit to investment-cycle acceleration rather than identical chart shape."
+      },
+      {
+        "ticker": "MU",
+        "name": "Micron",
+        "score": 0.82,
+        "regime_label": "Cyclical upswing",
+        "sector": "Memory",
+        "explanation": "Macro regime similarity with a slightly lagging participation pattern."
+      }
+    ],
+    "social_dna": [
+      {
+        "ticker": "SMCI",
+        "name": "Super Micro Computer",
+        "score": 0.95,
+        "regime_label": "Theme dominance",
+        "sector": "Servers",
+        "explanation": "One of the cleanest sentiment analogs due to concentrated AI infrastructure attention."
+      },
+      {
+        "ticker": "TSM",
+        "name": "TSMC",
+        "score": 0.83,
+        "regime_label": "Supply-chain attention",
+        "sector": "Semiconductors",
+        "explanation": "Narrative similarity emerges from AI supply chain exposure rather than consumer buzz."
+      },
+      {
+        "ticker": "DELL",
+        "name": "Dell",
+        "score": 0.79,
+        "regime_label": "Theme adjacency",
+        "sector": "Hardware",
+        "explanation": "Media and sentiment patterns cluster around AI server demand."
+      }
+    ]
+  },
+  "LLY": {
+    "price_dna": [
+      {
+        "ticker": "NVO",
+        "name": "Novo Nordisk",
+        "score": 0.92,
+        "regime_label": "Orderly leadership trend",
+        "sector": "Pharma",
+        "explanation": "Shared low-drawdown trend profile supported by durable category leadership."
+      },
+      {
+        "ticker": "ISRG",
+        "name": "Intuitive Surgical",
+        "score": 0.84,
+        "regime_label": "Quality compounder",
+        "sector": "Medical Devices",
+        "explanation": "A steadier momentum regime with similarly strong sponsorship quality."
+      },
+      {
+        "ticker": "COST",
+        "name": "Costco",
+        "score": 0.79,
+        "regime_label": "Defensive quality bid",
+        "sector": "Retail",
+        "explanation": "Cross-sector analog driven by low-drama upward persistence."
+      }
+    ],
+    "economic_dna": [
+      {
+        "ticker": "UNH",
+        "name": "UnitedHealth",
+        "score": 0.87,
+        "regime_label": "Defensive growth regime",
+        "sector": "Managed Care",
+        "explanation": "Matches the same macro preference for durable earnings in a mixed backdrop."
+      },
+      {
+        "ticker": "COST",
+        "name": "Costco",
+        "score": 0.82,
+        "regime_label": "Stability premium",
+        "sector": "Retail",
+        "explanation": "Economic DNA similarity comes from investor preference for predictability and resilience."
+      },
+      {
+        "ticker": "WM",
+        "name": "Waste Management",
+        "score": 0.77,
+        "regime_label": "Resilient cash-flow leadership",
+        "sector": "Industrials",
+        "explanation": "Cross-sector match driven by defensive quality conditions."
+      }
+    ],
+    "social_dna": [
+      {
+        "ticker": "NVO",
+        "name": "Novo Nordisk",
+        "score": 0.9,
+        "regime_label": "Credible catalyst narrative",
+        "sector": "Pharma",
+        "explanation": "Sentiment profile reflects sustained positive medical innovation coverage with limited controversy."
+      },
+      {
+        "ticker": "VRTX",
+        "name": "Vertex Pharmaceuticals",
+        "score": 0.81,
+        "regime_label": "Fundamental narrative consistency",
+        "sector": "Biotech",
+        "explanation": "Social DNA fits through steady positive scientific coverage rather than hype."
+      },
+      {
+        "ticker": "ISRG",
+        "name": "Intuitive Surgical",
+        "score": 0.76,
+        "regime_label": "Measured optimism",
+        "sector": "Medical Devices",
+        "explanation": "A calmer sentiment analog with strong credibility and low-noise coverage."
+      }
+    ]
+  }
+}
