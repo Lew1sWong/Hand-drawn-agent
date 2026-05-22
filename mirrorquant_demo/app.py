@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Literal
 
+from pandas import pd
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
@@ -149,3 +151,19 @@ async def get_industry_chain(ticker: str):
         raise HTTPException(status_code=404, detail=f"No industry chain data for {normalized}")
     return {"ticker": normalized, "relationships": chain_data[normalized]}
 
+@app.get("/api/price-series")
+async def get_price_series(ticker: str, start_date: str, end_date: str):
+    df = pd.read_csv(DATA_DIR / "price_series.csv", parse_dates=["date"])
+    window = df[
+        (df["ticker"] == ticker.upper()) &
+        (df["date"] >= pd.to_datetime(start_date)) &
+        (df["date"] <= pd.to_datetime(end_date))
+    ].sort_values("date")
+
+    return {
+        "ticker": ticker.upper(),
+        "series": [
+            {"date": row.date.strftime("%Y-%m-%d"), "close": float(row.close)} 
+            for row in window.itertuples(index=False)
+        ]
+    }

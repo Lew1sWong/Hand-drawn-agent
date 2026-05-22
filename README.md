@@ -31,6 +31,8 @@ mirrorquant_demo/
   train_vqvae.py
   encode_windows.py
   vqvae_search.py
+  fetch_prices_alpaca.py
+  fetch_prices_moomoo.py
   fetch_prices_alpha_vantage.py
   data/
     heroes.json
@@ -101,50 +103,146 @@ Because the current VQ-VAE was trained on fixed 40-day windows, the app encodes 
 - `GET /api/industry-chain/MSFT`
 - `GET /health`
 
-## Fetch Real Market Data With Alpha Vantage
+## Fetch Real Market Data With Alpaca
 
-The repo includes a fetch script that replaces the demo `prices.csv` with real daily OHLCV data from Alpha Vantage:
+The repo includes an Alpaca fetch script that replaces the demo `prices.csv` with real daily OHLCV stock bars:
 
-[`mirrorquant_demo/fetch_prices_alpha_vantage.py`](/abs/path/c:/Users/cheng/Desktop/Hand-drawn-agent/mirrorquant_demo/fetch_prices_alpha_vantage.py:1)
+[`mirrorquant_demo/fetch_prices_alpaca.py`](/abs/path/c:/Users/cheng/Desktop/Hand-drawn-agent/mirrorquant_demo/fetch_prices_alpaca.py:1)
 
-### Step 1: Get an API key
+Alpaca docs:
 
-Create a free Alpha Vantage API key here:
+- Historical stock bars endpoint: https://docs.alpaca.markets/us/reference/stockbars
+- Market Data getting started guide: https://docs.alpaca.markets/us/docs/getting-started-with-alpaca-market-data
 
-https://www.alphavantage.co/documentation/
+### Step 1: Create an Alpaca account and API keys
 
-### Step 2: Set the API key
+According to Alpaca's Market Data getting started guide, you generate keys from the Alpaca dashboard after creating an account.
 
-Add it to your environment or a local `.env` file:
+### Step 2: Set your Alpaca credentials
+
+Add them to your environment or a local `.env` file:
 
 ```env
-ALPHAVANTAGE_API_KEY=your_key_here
+APCA_API_KEY_ID=your_key_here
+APCA_API_SECRET_KEY=your_secret_here
 ```
+
+### Step 3: Install Alpaca support
+
+If needed:
+
+```bash
+pip install alpaca-py
+```
+
+### Step 4: Fetch prices
+
+Fetch the default demo tickers:
+
+```bash
+python mirrorquant_demo/fetch_prices_alpaca.py
+```
+
+Fetch a custom date range:
+
+```bash
+python mirrorquant_demo/fetch_prices_alpaca.py --start 2023-01-01 --end 2024-12-31
+```
+
+Fetch specific tickers:
+
+```bash
+python mirrorquant_demo/fetch_prices_alpaca.py --tickers MSFT NVDA LLY AAPL
+```
+
+The script defaults to the `iex` feed, which is the safest default for a basic setup. You can also request `sip` if your account has access:
+
+```bash
+python mirrorquant_demo/fetch_prices_alpaca.py --feed sip
+```
+
+## Optional moomoo Path
+
+If you want to pull price history through your moomoo account instead of Alpaca, the repo now also includes:
+
+[`mirrorquant_demo/fetch_prices_moomoo.py`](/abs/path/c:/Users/cheng/Desktop/Hand-drawn-agent/mirrorquant_demo/fetch_prices_moomoo.py:1)
+
+This path uses moomoo OpenAPI, which requires two parts:
+
+1. The Python SDK:
+
+```bash
+pip install moomoo-api
+```
+
+2. A locally running `OpenD` gateway signed in to your moomoo account.
+
+Official docs:
+
+- OpenAPI intro: https://openapi.moomoo.com/moomoo-api-doc/en/intro/intro.html
+- OpenD setup: https://openapi.moomoo.com/moomoo-api-doc/en/opend/opend-cmd.html
+- Python sample / install notes: https://openapi.moomoo.com/moomoo-api-doc/en/quick/demo.html
+- Historical candles API: https://openapi.moomoo.com/moomoo-api-doc/en/quote/request-history-kline.html
+
+### Step 1: Add your local OpenD settings
+
+Set these in your environment or local `.env` file:
+
+```env
+MOOMOO_HOST=127.0.0.1
+MOOMOO_PORT=11111
+MOOMOO_MARKET_PREFIX=US
+```
+
+### Step 2: Start OpenD and log in
+
+Start `OpenD` on your machine and sign in with your moomoo account before running the script. The fetcher talks to OpenD on `127.0.0.1:11111` by default.
 
 ### Step 3: Fetch prices
 
 Fetch the default demo tickers:
 
 ```bash
-python mirrorquant_demo/fetch_prices_alpha_vantage.py
+python mirrorquant_demo/fetch_prices_moomoo.py
 ```
 
-Or fetch specific tickers:
+Fetch a custom date range:
 
 ```bash
-python mirrorquant_demo/fetch_prices_alpha_vantage.py --tickers MSFT NVDA LLY AAPL
+python mirrorquant_demo/fetch_prices_moomoo.py --start 2023-01-01 --end 2024-12-31
 ```
 
-### Important Alpha Vantage note
+Fetch specific tickers:
 
-The current script uses `TIME_SERIES_DAILY` with `outputsize=compact`, which returns only the latest 100 daily points on the free tier. If you want deeper history, you will need either:
+```bash
+python mirrorquant_demo/fetch_prices_moomoo.py --tickers MSFT NVDA LLY AAPL
+```
 
-- a premium Alpha Vantage plan, or
-- a different market-data provider
+If you want to pass already-prefixed symbols, that works too:
+
+```bash
+python mirrorquant_demo/fetch_prices_moomoo.py --tickers US.MSFT US.NVDA SG.D05
+```
+
+Adjustment mode defaults to `qfq`, and you can switch it if needed:
+
+```bash
+python mirrorquant_demo/fetch_prices_moomoo.py --adjust none
+```
+
+Important note:
+
+- moomoo applies historical candlestick quotas and request limits, so very large symbol/date pulls may need to be split up.
+
+## Optional Alpha Vantage Path
+
+If you still want a second provider option, the repo also includes:
+
+[`mirrorquant_demo/fetch_prices_alpha_vantage.py`](/abs/path/c:/Users/cheng/Desktop/Hand-drawn-agent/mirrorquant_demo/fetch_prices_alpha_vantage.py:1)
 
 ## Retrain The AI
 
-If you change `prices.csv`, you should rebuild the VQ-VAE pipeline in this order.
+If you change `prices.csv`, you should rebuild the VQ-VAE pipeline in this exact order.
 
 ### 1. Build training windows
 
