@@ -234,6 +234,16 @@ Important note:
 
 - moomoo applies historical candlestick quotas and request limits, so very large symbol/date pulls may need to be split up.
 
+### Optional: Power The Dashboard With Live Market Watch Proxies
+
+The dashboard can also use a separate proxy price file for real market-watch sparklines. Fetch ETF proxies into `market_watch_prices.csv` like this:
+
+```bash
+python mirrorquant_demo/fetch_prices_moomoo.py --tickers SPY QQQ IWM TLT HYG --start 2024-01-01 --output mirrorquant_demo/data/market_watch_prices.csv
+```
+
+If that file exists, the `Market Watch` panel will use those real time series instead of demo-generated sparklines.
+
 ## Optional Alpha Vantage Path
 
 If you still want a second provider option, the repo also includes:
