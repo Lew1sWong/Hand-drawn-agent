@@ -133,4 +133,10 @@ def find_vqvae_mirrors(hero_ticker: str, start: str, end: str, top_k: int = 5):
         .reset_index(drop=True)
     )
 
-    return results, hero_code, effective_window
+    selected_window = {
+        "start_date": hero_window["date"].iloc[0],
+        "end_date": hero_window["date"].iloc[-1],
+        "row_count": len(hero_window),
+    }
+
+    return results, hero_code, selected_window, effective_window
